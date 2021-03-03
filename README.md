@@ -1,4 +1,4 @@
-# ferry
+# ferry (Work in Progress)
 
 	This utility will export all (or filtered) data from FoundationDB 
 	to one of the possible stores - a local file-system folder, Azure blobstore or Amazon S3
@@ -21,3 +21,9 @@
 	  -v, --verbose          Verbose logging
 
 	Use "ferry [command] --help" for more information about a command.
+
+# Differences from `fdbbackup`
+
+1. This isn't a backup tool, but mainly an export tool with more convenience options that may not apply to `fdbbackup` . We don't even attempt to read the mutation log, so the data will be stale if the DB is being modified at the same time. But for some applications, this may be enough.
+
+1. When a `file://` url is used with `fdbbackup`, the request is sent to all nodes which run `backup_agent` and each node will write to its local file system. This may not be what you want.
