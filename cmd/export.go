@@ -1,3 +1,6 @@
+/*
+Copyright 2021 Adobe. All rights reserved.
+*/
 package cmd
 
 import (
