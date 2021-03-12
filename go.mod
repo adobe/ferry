@@ -1,4 +1,4 @@
-module git.corp.adobe.com/hbhaskar/ferry
+module github.com/adobe/ferry
 
 go 1.16
 

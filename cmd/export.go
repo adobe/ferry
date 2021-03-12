@@ -15,7 +15,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"git.corp.adobe.com/hbhaskar/ferry/lib/exporter"
+	"github.com/adobe/ferry/lib/exporter"
 	"log"
 )
 
