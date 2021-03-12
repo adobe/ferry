@@ -1,5 +1,24 @@
 # ferry (Work in Progress)
 
+## Goals
+
+Provide a management utility to import and export data out of FoundationDB.
+
+## Non-Goals
+
+The utility is not designed to replace the wonderful `fdbbackup` tool.
+We do not attempt to copy or follow the foundationdb mutation log.
+We are also unable to fetch the entire DB in one transaction because
+of the 5-second transaction limit. See also `Differences from fdbbackup`
+section
+
+### Installation
+
+(Work in progress - Build repo using `go build`)
+
+### Usage
+
+
 	This utility will export all (or filtered) data from FoundationDB 
 	to one of the possible stores - a local file-system folder, Azure blobstore or Amazon S3
 	Export is not done in a single transaction and that implies you should only do this
