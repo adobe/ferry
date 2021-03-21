@@ -21,13 +21,18 @@ import (
 	"github.com/pkg/profile"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var cfgFile string
+var storeURL string
+var gLogger *zap.Logger
+var verbose bool
 
 var profilingRequested string // see github.com/pkg/profile
 var profilesAvailable = map[string]func(*profile.Profile){
-	"mem": 	profile.MemProfile,
+	"mem": profile.MemProfile,
 	"cpu": profile.CPUProfile,
 }
 
@@ -68,9 +73,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profilingRequested, "profile",
 		"", "mem|cpu (Go performance profiling)")
 
+	rootCmd.PersistentFlags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
+
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolP("verbose", "v", false, "Verbose logging")
+	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -104,5 +111,26 @@ func initConfig() {
 		} else {
 			log.Fatalf("Unknown profiling mode '%s' requested", profilingRequested)
 		}
+	}
+
+	zapLevel := zapcore.InfoLevel
+	if verbose {
+		zapLevel = zapcore.DebugLevel
+	}
+	zapConfig := zap.Config{
+		Level:             zap.NewAtomicLevelAt(zapLevel),
+		DisableCaller:     true,
+		DisableStacktrace: true,
+		Development:       verbose,
+		Encoding:          "console",
+		EncoderConfig:     zap.NewDevelopmentEncoderConfig(),
+		OutputPaths:       []string{"stderr"},
+		ErrorOutputPaths:  []string{"stderr"},
+	}
+	var err error
+	gLogger, err = zapConfig.Build()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 }

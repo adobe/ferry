@@ -13,16 +13,24 @@ governing permissions and limitations under the License.
 package exporter
 
 import (
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/pkg/errors"
+	"encoding/binary"
+	"fmt"
 	"log"
 	"sync"
+
+	"github.com/adobe/blackhole/lib/archive"
+	"github.com/adobe/blackhole/lib/archive/common"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 type Exporter struct {
-	db fdb.Database
+	db             fdb.Database
+	targetURL      string
 	readerKeysChan chan fdb.Range
 	readerStatChan chan readerStat
+	logger         *zap.Logger
 }
 
 type readerStat struct {
@@ -30,27 +38,85 @@ type readerStat struct {
 	bytesRead int64
 }
 
-func NewExporter(db fdb.Database, targetURL string) *Exporter {
+func NewExporter(db fdb.Database, targetURL string, logger *zap.Logger) *Exporter {
 
-	exp := &Exporter{db: db}
+	exp := &Exporter{db: db, targetURL: targetURL}
 	exp.readerKeysChan = make(chan fdb.Range)
 	exp.readerStatChan = make(chan readerStat)
+	exp.logger = logger
 
 	go exp.printStats()
 	return exp
 }
 
+const MAX_KEY_LEN = (1 << 14) - 1   // Max 14 bits for its length. We only need 10k. Buffer till 16k
+const MAX_VALUE_LEN = (1 << 18) - 1 // Max 18 bits for its length. We only need 100k. Buffer till 260k
+
+func saveRecord(ar archive.Archive, key, value []byte) (err error) {
+	const UINT32LEN = 4
+	var lbuf = make([]byte, UINT32LEN)
+
+	keyLen := len(key)
+	valueLen := len(value)
+	if keyLen > MAX_KEY_LEN {
+		return errors.Errorf("Sorry we only support key length up to %d bytes", MAX_KEY_LEN)
+	}
+	if valueLen > MAX_VALUE_LEN {
+		return errors.Errorf("Sorry we only support value length up to %d bytes", MAX_VALUE_LEN)
+	}
+	recordLen := uint32(keyLen<<18 | valueLen)
+
+	binary.LittleEndian.PutUint32(lbuf, recordLen)
+
+	n, err := ar.Write(lbuf)
+	if err != nil {
+		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, UINT32LEN)
+		log.Printf("%s: Error: %+v", msg, err)
+		return errors.Wrap(err, msg)
+	}
+
+	n, err = ar.Write(key)
+	if err != nil {
+		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, keyLen)
+		log.Printf("%s: Error: %+v", msg, err)
+		return errors.Wrap(err, msg)
+	}
+
+	n, err = ar.Write(value)
+	if err != nil {
+		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, valueLen)
+		log.Printf("%s: Error: %+v", msg, err)
+		return errors.Wrap(err, msg)
+	}
+	return err
+}
+
 func (exp *Exporter) printStats() {
 	var totalKeysRead, totalBytesRead int64
+	var totalKeysLastPrinted int64
 	for stat := range exp.readerStatChan {
 		totalBytesRead += stat.bytesRead
 		totalKeysRead += stat.keysRead
-		log.Printf("PROGRESS: Read %d keys, %d bytes so far", totalKeysRead, totalBytesRead)
+		if totalKeysRead-totalKeysLastPrinted > 1_000_000 {
+			log.Printf("PROGRESS: Read %d keys, %d bytes so far", totalKeysRead, totalBytesRead)
+			totalKeysLastPrinted = totalKeysRead
+		}
 	}
 	log.Printf("FINAL: Read %d keys, %d bytes so far", totalKeysRead, totalBytesRead)
 }
 
 func (exp *Exporter) dbReader(thread int) (err error) {
+
+	totalKeysRead := 0
+	totalKeysArchived := 0
+	log.Printf("targetURL= %s", exp.targetURL)
+	ar, err := archive.NewArchive(exp.targetURL, "fdb", ".records",
+		common.Compress(false),
+		common.BufferSize(0),
+		common.Logger(exp.logger))
+	if err != nil {
+		return errors.Wrapf(err, "Unable to create archive file")
+	}
 
 	for keyRange := range exp.readerKeysChan {
 		txn, err := exp.db.CreateTransaction()
@@ -70,11 +136,21 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 			}
 			keysRead++
 			bytesRead += len(kv.Key) + len(kv.Value)
+			saveRecord(ar, kv.Key, kv.Value)
+			totalKeysRead++
 		}
 		// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
 		txn.Commit()
 		exp.readerStatChan <- readerStat{keysRead: int64(keysRead), bytesRead: int64(bytesRead)}
 		keysRead, bytesRead = 0, 0 // reset to avoid double counting
+		if totalKeysRead-totalKeysArchived > 1_000_000 {
+			// Rotate every 1 million keys
+			totalKeysArchived = totalKeysRead
+			err = ar.Rotate()
+			if err != nil {
+				return errors.Wrapf(err, "Unable to rotate archive file")
+			}
+		}
 	}
 	return err
 }
@@ -86,7 +162,7 @@ func (exp *Exporter) Export() error {
 
 	for {
 		bKeys, err := exp.db.LocalityGetBoundaryKeys(fdb.KeyRange{Begin: beginKey, End: fdb.Key("\xFF")},
-		1000, 0)
+			1000, 0)
 		if err != nil {
 			return errors.Wrapf(err, "Error querying LocalityGetBoundaryKeys")
 		}

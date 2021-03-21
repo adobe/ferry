@@ -13,10 +13,11 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
-	"github.com/spf13/cobra"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/adobe/ferry/lib/exporter"
 	"log"
+
+	"github.com/adobe/ferry/lib/exporter"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/spf13/cobra"
 )
 
 // exportCmd represents the export command
@@ -31,7 +32,7 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 		fdb.MustAPIVersion(620)
 		// Open the default database from the system cluster
 		db := fdb.MustOpenDefault()
-		exp := exporter.NewExporter(db, "")
+		exp := exporter.NewExporter(db, storeURL, gLogger)
 		err := exp.Export()
 		if err != nil {
 			log.Printf("Export failed: %+v", err)
