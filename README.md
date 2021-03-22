@@ -19,6 +19,16 @@ of the 5-second transaction limit.
 
 (Work in progress - Build repo using `go build`)
 
+### Quickstart
+
+	ferry export -s /path/to/local/directory/
+
+	ferry export -s s3://bucket/path/to/directory
+	# credentials via `aws configure`
+
+	ferry export -s az://container/path/to/directory
+	# credentials via environment. See help from error message
+
 ### Usage
 
 
