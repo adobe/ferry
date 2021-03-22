@@ -3,14 +3,17 @@
 ## Goals
 
 Provide a management utility to import and export data out of FoundationDB.
+There is experimental support for transparent write to `file://`, `s3://`, or `az://` urls. 
+`az://` is a non-standard shorthand for azure blobstore urls.
+
+The utility can only run from a single client node at this point, but that isn't scalable long term.
 
 ## Non-Goals
 
 The utility is not designed to replace the wonderful `fdbbackup` tool.
 We do not attempt to copy or follow the foundationdb mutation log.
 We are also unable to fetch the entire DB in one transaction because
-of the 5-second transaction limit. See also `Differences from fdbbackup`
-section
+of the 5-second transaction limit. 
 
 ### Installation
 
@@ -41,8 +44,19 @@ section
 
 	Use "ferry [command] --help" for more information about a command.
 
-# Differences from `fdbbackup`
+## Export format
 
-1. This isn't a backup tool, but mainly an export tool with more convenience options that may not apply to `fdbbackup` . We don't even attempt to read the mutation log, so the data will be stale if the DB is being modified at the same time. But for some applications, this may be enough.
+Export format, in oversimplied term is a length-prefixed binary dump of the form
 
-1. When a `file://` url is used with `fdbbackup`, the request is sent to all nodes which run `backup_agent` and each node will write to its local file system. This may not be what you want.
+```
+[[ length ] [ key-bytes ] [ value-bytes ]] . . . .
+length = 4 bytes in little-endian format.
+Once read as an Unsigned Int 32, split them as
+
+key-length = length >> 18 & ((1 << 14) - 1)
+value-length = length & (1 << 18) - 1
+
+```
+
+We may look at flatbuffer for output format, but that depends on subsequent usage needs
+

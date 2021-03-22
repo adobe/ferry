@@ -13,6 +13,7 @@ governing permissions and limitations under the License.
 package exporter
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -28,7 +29,7 @@ import (
 type Exporter struct {
 	db             fdb.Database
 	targetURL      string
-	readerKeysChan chan fdb.Range
+	readerKeysChan chan fdb.KeyRange
 	readerStatChan chan readerStat
 	logger         *zap.Logger
 }
@@ -41,7 +42,7 @@ type readerStat struct {
 func NewExporter(db fdb.Database, targetURL string, logger *zap.Logger) *Exporter {
 
 	exp := &Exporter{db: db, targetURL: targetURL}
-	exp.readerKeysChan = make(chan fdb.Range)
+	exp.readerKeysChan = make(chan fdb.KeyRange)
 	exp.readerStatChan = make(chan readerStat)
 	exp.logger = logger
 
@@ -124,20 +125,71 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 			return errors.Wrapf(err, "Unable to create fdb transaction")
 		}
 
-		fKey := txn.GetRange(keyRange, fdb.RangeOptions{Limit: 1_000_000, Mode: fdb.StreamingModeSerial})
-		it := fKey.Iterator()
 		keysRead := 0
-		bytesRead := 0
-		for it.Advance() {
-			kv, err := it.Get()
-			if err != nil {
-				txn.Commit()
-				return errors.Wrapf(err, "Unable to create fdb transaction")
+		keysReadInOneTxn := 0
+		keysReadInOneBatch := 0
+		bytesRead := int64(0)
+		lastReadKey, endKey := keyRange.FDBRangeKeys()
+		batchReadLimit := 1_000_000
+	Fetch:
+		for {
+			fKey := txn.GetRange(keyRange, fdb.RangeOptions{Limit: batchReadLimit, Mode: fdb.StreamingModeSerial})
+			it := fKey.Iterator()
+			for it.Advance() {
+				// ---------------------------------------------------------
+				// uncomment line below for testing only
+				// time.Sleep(time.Millisecond * 1)
+				// This is to artifically create the 5 second txn limit test
+				// ---------------------------------------------------------
+				kv, err := it.Get()
+				if err != nil {
+					txn.Commit()
+					if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
+
+						exp.logger.Info("Txn limit hit, restarting txn",
+							zap.Int("after", keysReadInOneTxn))
+						// don't print key. Don't assume key is utf8 string
+						// zap.String("key", lastReadKey.FDBKey().String()))
+
+						txn, err = exp.db.CreateTransaction()
+						if err != nil {
+							return errors.Wrapf(err, "Unable to create fdb transaction")
+						}
+						keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
+						keysReadInOneTxn = 0
+						continue Fetch
+						// continue from where we last received
+					}
+					return errors.Wrapf(err, "Unable to create fdb transaction")
+				}
+				if keysReadInOneTxn == 0 && bytes.Equal(lastReadKey.FDBKey(), kv.Key) {
+					// When retrying transactions, we don't have a way to ask for
+					// starting from the 'next' key because we don't know what the next key is.
+					// We will need to give the same key as the beginKey for next try,
+					// and skip that first row when we get it back. beginKey is inclusive.
+					continue
+				}
+
+				keysRead++
+				keysReadInOneTxn++
+				keysReadInOneBatch++
+				bytesRead += int64(len(kv.Key) + len(kv.Value))
+				saveRecord(ar, kv.Key, kv.Value)
+				lastReadKey = kv.Key
+				totalKeysRead++
 			}
-			keysRead++
-			bytesRead += len(kv.Key) + len(kv.Value)
-			saveRecord(ar, kv.Key, kv.Value)
-			totalKeysRead++
+
+			if keysReadInOneBatch >= batchReadLimit {
+				// there might be more left.
+				exp.logger.Info("Batch limit hit, starting another batch",
+					zap.Int("after", keysReadInOneBatch),
+					zap.Int("total", keysRead))
+				keysReadInOneBatch = 0
+				keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
+				continue
+			}
+
+			break // we are really done
 		}
 		// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
 		txn.Commit()

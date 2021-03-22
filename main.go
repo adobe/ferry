@@ -16,4 +16,7 @@ import "github.com/adobe/ferry/cmd"
 
 func main() {
 	cmd.Execute()
+	if cmd.ProfileStarted != nil {
+		cmd.ProfileStarted.Stop()
+	}
 }

@@ -35,6 +35,7 @@ var profilesAvailable = map[string]func(*profile.Profile){
 	"mem": profile.MemProfile,
 	"cpu": profile.CPUProfile,
 }
+var ProfileStarted interface{ Stop() }
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -107,7 +108,7 @@ func initConfig() {
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {
-			profile.Start(p, profile.ProfilePath("."))
+			ProfileStarted = profile.Start(p, profile.ProfilePath("."))
 		} else {
 			log.Fatalf("Unknown profiling mode '%s' requested", profilingRequested)
 		}
