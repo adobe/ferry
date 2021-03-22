@@ -60,9 +60,14 @@ Export format, in oversimplied term is a length-prefixed binary dump of the form
 
 ```
 [[ length ] [ key-bytes ] [ value-bytes ]] . . . .
+
 length = 4 bytes in little-endian format.
 Once read as an Unsigned Int 32, split them as
+higher 14 bits is key length
+lower 18 bits is value length
+both considered enough for FDB limits
 
+Psuedo code below
 key-length = length >> 18 & ((1 << 14) - 1)
 value-length = length & (1 << 18) - 1
 
