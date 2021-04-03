@@ -12,57 +12,37 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
-	"fmt"
-
-	"github.com/adobe/blackhole/lib/archive"
+	"github.com/adobe/ferry/exporter/server"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
-var manageAction string
-
 // manageCmd represents the manage command
-var manageCmd = &cobra.Command{
-	Use:   "manage",
-	Short: "manages blobstore directory (list or delete recursively)",
-	Long:  `This is used to cleanup blobstore directory structure. Use with caution`,
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Serve exporter grpc server",
+	Long:  `Serve exporter grpc server`,
 
 	Run: func(cmd *cobra.Command, args []string) {
-
-		switch manageAction {
-		case "list":
-			list()
-		case "delete":
-			delete()
-		default:
-			gLogger.Fatal("Unknown action", zap.String("action", manageAction))
+		fdb.MustAPIVersion(620)
+		// Open the default database from the system cluster
+		db := fdb.MustOpenDefault()
+		srv := server.NewServer(db,
+			viper.GetInt("port"),
+			viper.GetString("tls.cert"),
+			viper.GetString("tls.privKey"),
+			gLogger)
+		err := srv.ServeExport()
+		if err != nil {
+			gLogger.Fatal("Server failed to start", zap.Error(err))
 		}
 	},
 }
 
-func list() {
-	fileList, err := archive.List(storeURL)
-	if err != nil {
-		gLogger.Fatal("List failed", zap.String("url", storeURL))
-	}
-	for _, file := range fileList {
-		fmt.Printf("%s\n", file)
-	}
-}
-
-func delete() {
-	fileList, err := archive.List(storeURL)
-	if err != nil {
-		gLogger.Fatal("List failed", zap.String("url", storeURL))
-	}
-	err = archive.Delete(storeURL, fileList)
-	if err != nil {
-		gLogger.Fatal("Delete failed", zap.String("url", storeURL))
-	}
-}
-
 func init() {
-	rootCmd.AddCommand(manageCmd)
+	rootCmd.AddCommand(serveCmd)
 
 	// Here you will define your flags and configuration settings.
 
@@ -72,5 +52,5 @@ func init() {
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
-	manageCmd.Flags().StringVarP(&manageAction, "action", "a", "list", "Action - list|delete")
+	serveCmd.Flags().StringVarP(&manageAction, "action", "a", "list", "Action - list|delete")
 }

@@ -14,7 +14,6 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -78,7 +77,10 @@ func init() {
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+
+	rootCmd.PersistentFlags().BoolP("dryrun", "n", false, "Dryrun connectivity check")
+	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -90,12 +92,14 @@ func initConfig() {
 		// Find home directory.
 		home, err := homedir.Dir()
 		if err != nil {
-			fmt.Println(err)
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Printf("Error finding home directory: %+v\n", err)
 			os.Exit(1)
 		}
 
 		// Search config in home directory with name ".ferry" (without extension).
 		viper.AddConfigPath(home)
+		viper.AddConfigPath(".")
 		viper.SetConfigName(".ferry")
 	}
 
@@ -103,19 +107,25 @@ func initConfig() {
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
+		// CAN'T USE ZAP - Logger not initilized yet
+		fmt.Printf("Using config file: %+v\n", viper.ConfigFileUsed())
 	}
+	viper.BindPFlag("port", rootCmd.PersistentFlags().Lookup("port"))
+	viper.BindPFlag("dryrun", rootCmd.PersistentFlags().Lookup("dryrun"))
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {
 			ProfileStarted = profile.Start(p, profile.ProfilePath("."))
 		} else {
-			log.Fatalf("Unknown profiling mode '%s' requested", profilingRequested)
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Printf("Unknown profiling mode: %s\n", profilingRequested)
+			os.Exit(1)
 		}
 	}
 
 	zapLevel := zapcore.InfoLevel
 	if verbose {
+		fmt.Println("Verbose logging")
 		zapLevel = zapcore.DebugLevel
 	}
 	zapConfig := zap.Config{
@@ -131,6 +141,7 @@ func initConfig() {
 	var err error
 	gLogger, err = zapConfig.Build()
 	if err != nil {
+		// CAN'T USE ZAP - Logger not initilized yet
 		fmt.Println(err)
 		os.Exit(1)
 	}

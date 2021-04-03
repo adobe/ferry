@@ -2,3 +2,7 @@
 .vscode
 ferry
 *.pprof
+*.csr
+*.pem
+*.key
+*.crt

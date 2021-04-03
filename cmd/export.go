@@ -13,11 +13,11 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
-	"log"
-
-	"github.com/adobe/ferry/lib/exporter"
+	"github.com/adobe/ferry/exporter/client"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 // exportCmd represents the export command
@@ -32,10 +32,26 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 		fdb.MustAPIVersion(620)
 		// Open the default database from the system cluster
 		db := fdb.MustOpenDefault()
-		exp := exporter.NewExporter(db, storeURL, gLogger)
-		err := exp.Export()
+		exp := client.NewExporter(db,
+			storeURL, viper.GetInt("port"),
+			gLogger, viper.GetBool("dryrun"), viper.GetString("tls.cert"))
+		bKeys, err := exp.GetBoundaryKeys()
 		if err != nil {
-			log.Printf("Export failed: %+v", err)
+			gLogger.Fatal("Error fetching boundary keys", zap.Error(err))
+		}
+		partitionMap, err := exp.GetLocations(bKeys)
+		if err != nil {
+			gLogger.Fatal("Error fetching locations", zap.Error(err))
+		}
+
+		exportPlan, err := exp.AssignSources(partitionMap)
+		if err != nil {
+			gLogger.Fatal("Error assigning export nodes", zap.Error(err))
+		}
+
+		err = exp.ScheduleFetch(exportPlan)
+		if err != nil {
+			gLogger.Fatal("Error scheduling exports", zap.Error(err))
 		}
 	},
 }

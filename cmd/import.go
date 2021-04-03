@@ -13,8 +13,6 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
-	"log"
-
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +24,7 @@ var importCmd = &cobra.Command{
 Import all data or a subset of keys to a target FoundationDB instance 
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Printf("import is not implemented yet")
+		gLogger.Fatal("import is not implemented yet")
 	},
 }
 
