@@ -29,14 +29,10 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-type Sessions struct {
-	sessions map[string]*session.ExporterSession
-	sync.Mutex
-}
 type Server struct {
 	logger   *zap.Logger
 	db       fdb.Database
-	sessions Sessions
+	sessions sync.Map
 	bindPort int
 	certFile string
 	keyFile  string
@@ -50,7 +46,6 @@ func NewServer(db fdb.Database, bindPort int, certFile, keyFile string, logger *
 		bindPort: bindPort,
 		certFile: certFile,
 		keyFile:  keyFile,
-		sessions: Sessions{sessions: make(map[string]*session.ExporterSession)},
 	}
 }
 
@@ -84,9 +79,7 @@ func (exp *Server) StartSession(ctx context.Context, tgt *ferry.Target) (*ferry.
 	}
 
 	sessionID := es.GetSessionID()
-	exp.sessions.Lock()
-	exp.sessions.sessions[sessionID] = es
-	exp.sessions.Unlock()
+	exp.sessions.Store(sessionID, es)
 	exp.logger.Info("Created session", zap.String("sessionID", sessionID))
 
 	return &ferry.SessionResponse{SessionId: sessionID, Status: ferry.SessionResponse_SUCCESS}, err
@@ -103,27 +96,41 @@ func (exp *Server) Export(srv ferry.Ferry_ExportServer) error {
 		if err == io.EOF {
 			break
 		}
+		if err != nil {
+			exp.logger.Error("Stream receive failed",
+				zap.String("last-known-sessionID", currentSessionID))
+			if es != nil {
+				// If `es` is set, it is assumed
+				// to be pop-ed - cleanup resources
+				es.Close()
+			}
+			return errors.Errorf("Single stream cannot have multiple session ids %s", currentSessionID)
+		}
 		if req.SessionId != currentSessionID {
 			if currentSessionID != "" {
 				exp.logger.Error("Single stream cannot have multiple session ids",
 					zap.String("current-sessionID", currentSessionID),
 					zap.String("new-sessionID", req.SessionId))
-				return errors.Errorf("Corrupted tracker and invalid session id %s", currentSessionID)
+				if es != nil {
+					// If `es` is set, it is assumed
+					// to be pop-ed - cleanup resources
+					es.Close()
+				}
+				return errors.Errorf("Single stream cannot have multiple session ids %s", currentSessionID)
 			}
 			currentSessionID = req.SessionId
 
-			/* CRITICAL SECTION ---- START --- */
-			exp.sessions.Lock()
-			es, ok = exp.sessions.sessions[currentSessionID]
+			var esi interface{}
+			esi, ok = exp.sessions.LoadAndDelete(currentSessionID)
 			if !ok {
-				exp.sessions.Unlock()
+				// Can't free `es`, not set yet
 				return errors.Errorf("Invalid session id %s", currentSessionID)
 			}
-			es.Lock()
-			es.MarkInUse(true)
-			es.Unlock()
-			exp.sessions.Unlock()
-			/* CRITICAL SECTION ---- END --- */
+			es, ok = esi.(*session.ExporterSession)
+			if !ok {
+				// Can't free `es`, not set yet
+				return errors.Errorf("Invalid session id %s", currentSessionID)
+			}
 
 			exp.logger.Info("Start export stream", zap.String("sessionID", currentSessionID))
 		}
@@ -135,46 +142,31 @@ func (exp *Server) Export(srv ferry.Ferry_ExportServer) error {
 		es.Send(fdb.KeyRange{Begin: fdb.Key(req.Begin), End: fdb.Key(req.End)})
 	}
 
-	/* CRITICAL SECTION ---- START --- */
-	exp.sessions.Lock()
-	es, ok = exp.sessions.sessions[currentSessionID]
-	if !ok {
-		exp.sessions.Unlock()
-		return errors.Errorf("Invalid session id %s", currentSessionID)
+	if es != nil {
+		// Store it back. This is critical, we had *deleted* it earlier
+		// Storing it back is how we indicate it is now free to be acquired
+		// for cleanup
+		exp.sessions.Store(currentSessionID, es)
 	}
-	es.Lock()
-	es.MarkInUse(false)
-	es.Unlock()
-	exp.sessions.Unlock()
-	/* CRITICAL SECTION ---- END --- */
 
 	return nil
 }
 func (exp *Server) EndSession(ctx context.Context, fs *ferry.Session) (*ferry.SessionResponse, error) {
 
 	var es *session.ExporterSession
+	var ok bool
 
 	exp.logger.Info("Received EndSession", zap.String("sessionID", fs.SessionId))
 
-	/* CRITICAL SECTION ---- START --- */
-	exp.sessions.Lock()
-	es, ok := exp.sessions.sessions[fs.SessionId]
+	var esi interface{}
+	esi, ok = exp.sessions.LoadAndDelete(fs.SessionId)
 	if !ok {
-		exp.sessions.Unlock()
-		return nil, errors.Errorf("Invalid session id %s", fs.SessionId)
+		return nil, errors.Errorf("Invalid session id OR Session is in use - %s", fs.SessionId)
 	}
-	es.Lock()
-	if es.InUse() {
-		es.Unlock()
-		exp.sessions.Unlock()
-		exp.logger.Error("SEQUENCING ERROR: Attempting to delete in-use session!",
-			zap.String("sessionID", fs.SessionId))
-		return nil, errors.Errorf("SEQUENCING ERROR: Attempting to delete in-use session! %s", fs.SessionId)
+	es, ok = esi.(*session.ExporterSession)
+	if !ok {
+		return nil, errors.Errorf("Corrupted tracker for session id %s", fs.SessionId)
 	}
-	delete(exp.sessions.sessions, fs.SessionId)
-	es.Unlock()
-	exp.sessions.Unlock()
-	/* CRITICAL SECTION ---- END --- */
 
 	exp.logger.Debug("Releasing resources", zap.String("sessionID", fs.SessionId))
 	es.Close()

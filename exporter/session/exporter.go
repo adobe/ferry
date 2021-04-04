@@ -153,11 +153,11 @@ func (es *ExporterSession) printStats() {
 		totalBytesRead += stat.bytesRead
 		totalKeysRead += stat.keysRead
 		if totalKeysRead-totalKeysLastPrinted > 1_000_000 {
-			es.logger.Debug("Progress", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
+			es.logger.Info("Progress", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
 			totalKeysLastPrinted = totalKeysRead
 		}
 	}
-	es.logger.Debug("Session total", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
+	es.logger.Info("Session total", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
 }
 
 func (es *ExporterSession) dbReader(thread int) (err error) {
