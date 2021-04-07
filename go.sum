@@ -30,6 +30,8 @@ github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/adobe/blackhole v0.1.4 h1:vcauUGJA1jccyYTtPuiGlLX1mrz310IY2A7oFAptvTM=
 github.com/adobe/blackhole v0.1.4/go.mod h1:vFpnK+8afKvqiWJ2f2dChryq8YomoOYQ5NSECnKgXIQ=
+github.com/adobe/blackhole v0.1.5-0.20210405174844-4ec273713a87 h1:NtcFQjeQzqXam6hw3jlO5Qj1fvE7HLgkII+Nb3ixPAQ=
+github.com/adobe/blackhole v0.1.5-0.20210405174844-4ec273713a87/go.mod h1:vFpnK+8afKvqiWJ2f2dChryq8YomoOYQ5NSECnKgXIQ=
 github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/andybalholm/brotli v1.0.1/go.mod h1:loMXtMfwqflxFJPmdbJO0a3KNoPuLBgiu3qAvBg8x/Y=

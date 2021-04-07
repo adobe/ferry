@@ -17,6 +17,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,7 +57,7 @@ func (exp *Server) ServeExport() (err error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", exp.bindPort))
 	if err != nil {
 		exp.logger.Warn("Failed to listed on port", zap.Int("ca-file", exp.bindPort))
-		return errors.Wrapf(err, "Failed to listed on port %s", exp.bindPort)
+		return errors.Wrapf(err, "Failed to listed on port %d", exp.bindPort)
 	}
 
 	creds, err := credentials.NewServerTLSFromFile(exp.certFile, exp.keyFile)
@@ -66,13 +69,18 @@ func (exp *Server) ServeExport() (err error) {
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
 	ferry.RegisterFerryServer(grpcServer, exp)
 	exp.logger.Info("Listening", zap.String("port", fmt.Sprintf("%+v", exp.bindPort)))
-	grpcServer.Serve(listener)
-	return nil
+	err = grpcServer.Serve(listener)
+	return err
 }
 
 func (exp *Server) StartSession(ctx context.Context, tgt *ferry.Target) (*ferry.SessionResponse, error) {
 
-	es, err := session.NewSession(exp.db, tgt.TargetUrl, exp.logger)
+	es, err := session.NewSession(exp.db,
+		tgt.TargetUrl,
+		int(tgt.ReaderThreads),
+		tgt.Compress,
+		exp.logger,
+		tgt.SamplingMode)
 	if err != nil {
 		exp.logger.Warn("Failed to create a session ID", zap.Error(err))
 		return nil, errors.Wrap(err, "Failed to create a session ID")
@@ -102,7 +110,7 @@ func (exp *Server) Export(srv ferry.Ferry_ExportServer) error {
 			if es != nil {
 				// If `es` is set, it is assumed
 				// to be pop-ed - cleanup resources
-				es.Close()
+				es.Finalize()
 			}
 			return errors.Errorf("Single stream cannot have multiple session ids %s", currentSessionID)
 		}
@@ -114,7 +122,7 @@ func (exp *Server) Export(srv ferry.Ferry_ExportServer) error {
 				if es != nil {
 					// If `es` is set, it is assumed
 					// to be pop-ed - cleanup resources
-					es.Close()
+					es.Finalize()
 				}
 				return errors.Errorf("Single stream cannot have multiple session ids %s", currentSessionID)
 			}
@@ -169,12 +177,58 @@ func (exp *Server) EndSession(ctx context.Context, fs *ferry.Session) (*ferry.Se
 	}
 
 	exp.logger.Debug("Releasing resources", zap.String("sessionID", fs.SessionId))
-	es.Close()
+	finalPaths := es.Finalize()
 	exp.logger.Info("Released resources", zap.String("sessionID", fs.SessionId))
-	return &ferry.SessionResponse{SessionId: fs.SessionId, Status: ferry.SessionResponse_SUCCESS}, nil
+	return &ferry.SessionResponse{
+		SessionId:      fs.SessionId,
+		Status:         ferry.SessionResponse_SUCCESS,
+		FinalizedFiles: finalPaths,
+	}, nil
 }
 
 func (exp *Server) GiveTimeOfTheDay(ctx context.Context, clientTime *ferry.Time) (*ferry.Time, error) {
 
 	return &ferry.Time{Ts: time.Now().UnixNano()}, nil
+}
+
+func (exp *Server) GetFile(fr *ferry.FileRequest, resp ferry.Ferry_GetFileServer) (err error) {
+
+	if strings.Contains(fr.TargetUrl, "://") && !strings.HasPrefix(fr.TargetUrl, "file://") {
+		return errors.New("This method is only implemented for targets of file://")
+	}
+	fr.TargetUrl = strings.TrimPrefix(fr.TargetUrl, "file://")
+	fp, err := os.Open(path.Join(fr.TargetUrl, fr.FileName))
+	if err != nil {
+		return errors.Wrapf(err, "Error opening node-local file: %s", fr.FileName)
+	}
+	buf := make([]byte, fr.BlockSize)
+
+	blockNum := 0
+	eof := false
+	for {
+		n, err := fp.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				eof = true // don't bail yet. Have data to process
+			} else {
+				return errors.Wrapf(err, "Error reading file: %s", fr.FileName)
+			}
+		}
+		if n != 0 { // note: `err` could still has unhandled `io.EOF` value
+			// there is data to send
+			blockNum++
+			errGrpc := resp.Send(&ferry.FileRequestResponse{
+				FileName:  fr.FileName,
+				BlockNum:  int32(blockNum),
+				BlockData: buf[:n], // IMPORTANT: use only up to n bytes
+			})
+			if errGrpc != nil {
+				return errors.Wrapf(errGrpc, "Error from grpc stream send for %s", fr.FileName)
+			}
+		}
+		if eof {
+			break
+		}
+	}
+	return nil
 }

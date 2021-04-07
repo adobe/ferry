@@ -26,6 +26,7 @@ var serveCmd = &cobra.Command{
 	Long:  `Serve exporter grpc server`,
 
 	Run: func(cmd *cobra.Command, args []string) {
+
 		fdb.MustAPIVersion(620)
 		// Open the default database from the system cluster
 		db := fdb.MustOpenDefault()
@@ -44,13 +45,10 @@ var serveCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(serveCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// manageCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	serveCmd.Flags().StringVarP(&manageAction, "action", "a", "list", "Action - list|delete")
+	// ------------------------------------------------------------------------
+	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
+	// viper.SetDefault() in root.go. Then it will apply to both paths. If you
+	// set them here, it will always override what is in .ferry.yaml (making the
+	// config file useless)
+	// ------------------------------------------------------------------------
 }

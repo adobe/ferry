@@ -47,7 +47,11 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Usage() // When run without any sub-commands, print help
+		err := cmd.Usage() // When run without any sub-commands, print help
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	},
 }
 
@@ -73,14 +77,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profilingRequested, "profile",
 		"", "mem|cpu (Go performance profiling)")
 
-	rootCmd.PersistentFlags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
-
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to (applies to `serve` and `export` commands")
 
-	rootCmd.PersistentFlags().BoolP("dryrun", "n", false, "Dryrun connectivity check")
-	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -102,6 +103,8 @@ func initConfig() {
 		viper.AddConfigPath(".")
 		viper.SetConfigName(".ferry")
 	}
+	viper.SetDefault("port", 8001)
+	viper.SetDefault("threads", 10)
 
 	viper.AutomaticEnv() // read in environment variables that match
 
@@ -110,8 +113,37 @@ func initConfig() {
 		// CAN'T USE ZAP - Logger not initilized yet
 		fmt.Printf("Using config file: %+v\n", viper.ConfigFileUsed())
 	}
-	viper.BindPFlag("port", rootCmd.PersistentFlags().Lookup("port"))
-	viper.BindPFlag("dryrun", rootCmd.PersistentFlags().Lookup("dryrun"))
+
+	for _, v := range []string{"port"} { // PERSISTENT FLAGS SET AT ROOT
+		if pf := rootCmd.PersistentFlags().Lookup(v); pf != nil {
+			err := viper.BindPFlag(v, pf)
+			if err != nil {
+				// CAN'T USE ZAP - Logger not initilized yet
+				fmt.Printf("Error from BindPFlag (rootCmd): %+v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Println("Unknown flag ", v)
+			os.Exit(1)
+		}
+	}
+
+	// FLAGS SPECIFIC TO EXPORT
+	for _, v := range []string{"dryrun", "sample", "compress", "threads", "collect"} {
+		if pf := exportCmd.Flags().Lookup(v); pf != nil {
+			err := viper.BindPFlag(v, pf)
+			if err != nil {
+				// CAN'T USE ZAP - Logger not initilized yet
+				fmt.Printf("Error from BindPFlag (exportCmd): %+v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Println("Unknown flag ", v)
+			os.Exit(1)
+		}
+	}
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {

@@ -9,6 +9,19 @@ service Ferry {
    rpc StartSession(Target) returns (SessionResponse) {}
    rpc Export(stream KeyRequest) returns (SessionResponse) {}
    rpc EndSession(Session) returns (SessionResponse) {}
+   rpc GetFile(FileRequest) returns (stream FileRequestResponse) {}
+}
+
+message FileRequest {
+    string target_url = 1;
+    string fileName = 2;
+    int32 blockSize = 3;
+}
+
+message FileRequestResponse {
+    string fileName = 1;
+    int32 blockNum = 2;
+    bytes blockData = 3;
 }
 
 message Time {
@@ -17,6 +30,9 @@ message Time {
 
 message Target {
     string target_url = 1;
+    int32 readerThreads = 2;
+    bool compress = 3;
+    bool samplingMode = 4;
 }
 
 message KeyRequest {
@@ -52,6 +68,7 @@ message SessionResponse {
     SessionState state = 2; // final state of session
     string session_id = 3; // session_id for the app level session
     string error_details = 4; // only set on success
+    repeated string finalized_files = 5;
 }
 
 message Session {

@@ -31,13 +31,11 @@ Import all data or a subset of keys to a target FoundationDB instance
 func init() {
 	rootCmd.AddCommand(importCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// importCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// importCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	// ------------------------------------------------------------------------
+	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
+	// viper.SetDefault() in root.go. Then it will apply to both paths. If you
+	// set them here, it will always override what is in .ferry.yaml (making the
+	// config file useless)
+	// ------------------------------------------------------------------------
+	importCmd.Flags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
 }

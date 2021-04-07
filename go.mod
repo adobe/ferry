@@ -3,7 +3,7 @@ module github.com/adobe/ferry
 go 1.16
 
 require (
-	github.com/adobe/blackhole v0.1.4
+	github.com/adobe/blackhole v0.1.5-0.20210405174844-4ec273713a87
 	github.com/apple/foundationdb/bindings/go v0.0.0-20210301215213-98a8f3e30802
 	github.com/google/uuid v1.2.0
 	github.com/mitchellh/go-homedir v1.1.0
@@ -19,4 +19,4 @@ require (
 
 )
 
-// replace github.com/adobe/blackhole => ../blackhole
+replace github.com/adobe/blackhole => ../blackhole

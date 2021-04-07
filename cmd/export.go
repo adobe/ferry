@@ -32,9 +32,19 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 		fdb.MustAPIVersion(620)
 		// Open the default database from the system cluster
 		db := fdb.MustOpenDefault()
-		exp := client.NewExporter(db,
+		exp, err := client.NewExporter(db,
 			storeURL, viper.GetInt("port"),
-			gLogger, viper.GetBool("dryrun"), viper.GetString("tls.cert"))
+			viper.GetString("tls.cert"),
+			client.Logger(gLogger),
+			client.Dryrun(viper.GetBool("dryrun")),
+			client.Sample(viper.GetBool("sample")),
+			client.Compress(viper.GetBool("compress")),
+			client.ReaderThreads(viper.GetInt("threads")),
+			client.Collect(viper.GetString("collect")),
+		)
+		if err != nil {
+			gLogger.Fatal("Error initializing exporter", zap.Error(err))
+		}
 		bKeys, err := exp.GetBoundaryKeys()
 		if err != nil {
 			gLogger.Fatal("Error fetching boundary keys", zap.Error(err))
@@ -59,13 +69,16 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 func init() {
 	rootCmd.AddCommand(exportCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// exportCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// exportCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	// ------------------------------------------------------------------------
+	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
+	// viper.SetDefault() in root.go. Then it will apply to both paths. If you
+	// set them here, it will always override what is in .ferry.yaml (making the
+	// config file useless)
+	// ------------------------------------------------------------------------
+	exportCmd.Flags().BoolP("dryrun", "n", false, "Dryrun connectivity check")
+	exportCmd.Flags().BoolP("sample", "m", false, "Sample - fetch only 1000 keys per range")
+	exportCmd.Flags().BoolP("compress", "c", false, "Compress export files (.lz4)")
+	exportCmd.Flags().IntP("threads", "t", 0, "How many threads per range")
+	exportCmd.Flags().StringP("collect", "", "", "Bring backup files to this host at this directory. Only applies to file:// targets")
+	exportCmd.Flags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
 }

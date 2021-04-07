@@ -22,6 +22,7 @@ type FerryClient interface {
 	StartSession(ctx context.Context, in *Target, opts ...grpc.CallOption) (*SessionResponse, error)
 	Export(ctx context.Context, opts ...grpc.CallOption) (Ferry_ExportClient, error)
 	EndSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error)
+	GetFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (Ferry_GetFileClient, error)
 }
 
 type ferryClient struct {
@@ -93,6 +94,38 @@ func (c *ferryClient) EndSession(ctx context.Context, in *Session, opts ...grpc.
 	return out, nil
 }
 
+func (c *ferryClient) GetFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (Ferry_GetFileClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Ferry_ServiceDesc.Streams[1], "/ferry.Ferry/GetFile", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &ferryGetFileClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Ferry_GetFileClient interface {
+	Recv() (*FileRequestResponse, error)
+	grpc.ClientStream
+}
+
+type ferryGetFileClient struct {
+	grpc.ClientStream
+}
+
+func (x *ferryGetFileClient) Recv() (*FileRequestResponse, error) {
+	m := new(FileRequestResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // FerryServer is the server API for Ferry service.
 // All implementations must embed UnimplementedFerryServer
 // for forward compatibility
@@ -101,6 +134,7 @@ type FerryServer interface {
 	StartSession(context.Context, *Target) (*SessionResponse, error)
 	Export(Ferry_ExportServer) error
 	EndSession(context.Context, *Session) (*SessionResponse, error)
+	GetFile(*FileRequest, Ferry_GetFileServer) error
 	mustEmbedUnimplementedFerryServer()
 }
 
@@ -119,6 +153,9 @@ func (UnimplementedFerryServer) Export(Ferry_ExportServer) error {
 }
 func (UnimplementedFerryServer) EndSession(context.Context, *Session) (*SessionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EndSession not implemented")
+}
+func (UnimplementedFerryServer) GetFile(*FileRequest, Ferry_GetFileServer) error {
+	return status.Errorf(codes.Unimplemented, "method GetFile not implemented")
 }
 func (UnimplementedFerryServer) mustEmbedUnimplementedFerryServer() {}
 
@@ -213,6 +250,27 @@ func _Ferry_EndSession_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Ferry_GetFile_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(FileRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(FerryServer).GetFile(m, &ferryGetFileServer{stream})
+}
+
+type Ferry_GetFileServer interface {
+	Send(*FileRequestResponse) error
+	grpc.ServerStream
+}
+
+type ferryGetFileServer struct {
+	grpc.ServerStream
+}
+
+func (x *ferryGetFileServer) Send(m *FileRequestResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Ferry_ServiceDesc is the grpc.ServiceDesc for Ferry service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -238,6 +296,11 @@ var Ferry_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "Export",
 			Handler:       _Ferry_Export_Handler,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "GetFile",
+			Handler:       _Ferry_GetFile_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "ferry.proto",

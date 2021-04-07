@@ -38,4 +38,11 @@ var infoCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(infoCmd)
+
+	// ------------------------------------------------------------------------
+	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
+	// viper.SetDefault() in root.go. Then it will apply to both paths. If you
+	// set them here, it will always override what is in .ferry.yaml (making the
+	// config file useless)
+	// ------------------------------------------------------------------------
 }
