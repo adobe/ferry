@@ -12,10 +12,11 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
-	"log"
+	"fmt"
 
 	"github.com/adobe/blackhole/lib/archive"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 var manageAction string
@@ -34,7 +35,7 @@ var manageCmd = &cobra.Command{
 		case "delete":
 			delete()
 		default:
-			log.Printf("Unknown action: %s", manageAction)
+			gLogger.Fatal("Unknown action", zap.String("action", manageAction))
 		}
 	},
 }
@@ -42,34 +43,33 @@ var manageCmd = &cobra.Command{
 func list() {
 	fileList, err := archive.List(storeURL)
 	if err != nil {
-		log.Printf("Export failed: %+v", err)
+		gLogger.Fatal("List failed", zap.String("url", storeURL))
 	}
 	for _, file := range fileList {
-		log.Printf("%s", file)
+		fmt.Printf("%s\n", file)
 	}
 }
 
 func delete() {
 	fileList, err := archive.List(storeURL)
 	if err != nil {
-		log.Printf("Export failed: %+v", err)
+		gLogger.Fatal("List failed", zap.String("url", storeURL))
 	}
 	err = archive.Delete(storeURL, fileList)
 	if err != nil {
-		log.Printf("manage failed: %+v", err)
+		gLogger.Fatal("Delete failed", zap.String("url", storeURL))
 	}
 }
 
 func init() {
 	rootCmd.AddCommand(manageCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// manageCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
+	// ------------------------------------------------------------------------
+	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
+	// viper.SetDefault() in root.go. Then it will apply to both paths. If you
+	// set them here, it will always override what is in .ferry.yaml (making the
+	// config file useless)
+	// ------------------------------------------------------------------------
 	manageCmd.Flags().StringVarP(&manageAction, "action", "a", "list", "Action - list|delete")
+	manageCmd.Flags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
 }

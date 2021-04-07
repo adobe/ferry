@@ -9,27 +9,41 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-
 package cmd
 
 import (
+	"github.com/adobe/ferry/exporter/server"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
-// importCmd represents the import command
-var importCmd = &cobra.Command{
-	Use:   "import",
-	Short: "Import all (or filtered set of) keys and values from an export",
-	Long: `Import data from the set of files created via the 'export' sub-command earlier.
-Import all data or a subset of keys to a target FoundationDB instance 
-`,
+// manageCmd represents the manage command
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Serve exporter grpc server",
+	Long:  `Serve exporter grpc server`,
+
 	Run: func(cmd *cobra.Command, args []string) {
-		gLogger.Fatal("import is not implemented yet")
+
+		fdb.MustAPIVersion(620)
+		// Open the default database from the system cluster
+		db := fdb.MustOpenDefault()
+		srv := server.NewServer(db,
+			viper.GetInt("port"),
+			viper.GetString("tls.cert"),
+			viper.GetString("tls.privKey"),
+			gLogger)
+		err := srv.ServeExport()
+		if err != nil {
+			gLogger.Fatal("Server failed to start", zap.Error(err))
+		}
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(serveCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
@@ -37,5 +51,4 @@ func init() {
 	// set them here, it will always override what is in .ferry.yaml (making the
 	// config file useless)
 	// ------------------------------------------------------------------------
-	importCmd.Flags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
 }

@@ -1,0 +1,5 @@
+port: 8001
+threads: 10 # Reader threads per node
+tls:
+  cert: ./server.crt
+  privkey: ./server.key

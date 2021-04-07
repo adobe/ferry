@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+option go_package = "github.com/adobe/ferry/lib/ferry";
+
+package ferry;
+
+service Ferry {
+   rpc GiveTimeOfTheDay(Time) returns (Time) {}
+   rpc StartSession(Target) returns (SessionResponse) {}
+   rpc Export(stream KeyRequest) returns (SessionResponse) {}
+   rpc EndSession(Session) returns (SessionResponse) {}
+   rpc GetFile(FileRequest) returns (stream FileRequestResponse) {}
+}
+
+message FileRequest {
+    string target_url = 1;
+    string fileName = 2;
+    int32 blockSize = 3;
+}
+
+message FileRequestResponse {
+    string fileName = 1;
+    int32 blockNum = 2;
+    bytes blockData = 3;
+}
+
+message Time {
+    int64 ts = 1;
+}
+
+message Target {
+    string target_url = 1;
+    int32 readerThreads = 2;
+    bool compress = 3;
+    bool samplingMode = 4;
+}
+
+message KeyRequest {
+    bytes begin = 1;
+    bytes end = 2;
+    string session_id = 3; // session_id for the app level session
+}
+
+message KeyRangeResponse {
+    enum OpStatus {
+        SUCCESS = 0;   // 
+        FAILURE = 1;   // FINAL failure - won't retry
+        TRANSIENT = 2; // TRANSIENT failure
+    }
+    bytes begin_key = 1;
+    bytes end_key = 2;
+    int64 start_time = 3;
+    int64 end_time = 4;
+    OpStatus status = 5;
+    string file_url = 6; // only set on success
+}
+
+message SessionResponse {
+    enum OpStatus {
+        SUCCESS = 0;
+        FAILURE = 1;
+    }
+    enum SessionState {
+        OPEN = 0;
+        CLOSED = 1;
+    }
+    OpStatus status = 1; // status of operation
+    SessionState state = 2; // final state of session
+    string session_id = 3; // session_id for the app level session
+    string error_details = 4; // only set on success
+    repeated string finalized_files = 5;
+}
+
+message Session {
+    string session_id = 1; // session_id for the app level session
+}

@@ -9,27 +9,35 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-
 package cmd
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
-// importCmd represents the import command
-var importCmd = &cobra.Command{
-	Use:   "import",
-	Short: "Import all (or filtered set of) keys and values from an export",
-	Long: `Import data from the set of files created via the 'export' sub-command earlier.
-Import all data or a subset of keys to a target FoundationDB instance 
-`,
+// infoCmd represents the manage command
+var infoCmd = &cobra.Command{
+	Use:   "info",
+	Short: "Print info on effective config",
+	Long:  `Print info on effective config`,
+
 	Run: func(cmd *cobra.Command, args []string) {
-		gLogger.Fatal("import is not implemented yet")
+		b, err := json.MarshalIndent(viper.AllSettings(), "", "\t")
+		if err != nil {
+			fmt.Printf("%+v", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(b))
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(infoCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
@@ -37,5 +45,4 @@ func init() {
 	// set them here, it will always override what is in .ferry.yaml (making the
 	// config file useless)
 	// ------------------------------------------------------------------------
-	importCmd.Flags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
 }

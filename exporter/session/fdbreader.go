@@ -10,13 +10,12 @@ OF ANY KIND, either express or implied. See the License for the specific languag
 governing permissions and limitations under the License.
 */
 
-package exporter
+package session
 
 import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/adobe/blackhole/lib/archive"
@@ -26,34 +25,10 @@ import (
 	"go.uber.org/zap"
 )
 
-type Exporter struct {
-	db             fdb.Database
-	targetURL      string
-	readerKeysChan chan fdb.KeyRange
-	readerStatChan chan readerStat
-	logger         *zap.Logger
-}
-
-type readerStat struct {
-	keysRead  int64
-	bytesRead int64
-}
-
-func NewExporter(db fdb.Database, targetURL string, logger *zap.Logger) *Exporter {
-
-	exp := &Exporter{db: db, targetURL: targetURL}
-	exp.readerKeysChan = make(chan fdb.KeyRange)
-	exp.readerStatChan = make(chan readerStat)
-	exp.logger = logger
-
-	go exp.printStats()
-	return exp
-}
-
 const MAX_KEY_LEN = (1 << 14) - 1   // Max 14 bits for its length. We only need 10k. Buffer till 16k
 const MAX_VALUE_LEN = (1 << 18) - 1 // Max 18 bits for its length. We only need 100k. Buffer till 260k
 
-func saveRecord(ar archive.Archive, key, value []byte) (err error) {
+func (es *ExporterSession) saveRecord(ar archive.Archive, key, value []byte) (err error) {
 	const UINT32LEN = 4
 	var lbuf = make([]byte, UINT32LEN)
 
@@ -72,55 +47,58 @@ func saveRecord(ar archive.Archive, key, value []byte) (err error) {
 	n, err := ar.Write(lbuf)
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, UINT32LEN)
-		log.Printf("%s: Error: %+v", msg, err)
+		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", UINT32LEN))
 		return errors.Wrap(err, msg)
 	}
 
 	n, err = ar.Write(key)
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, keyLen)
-		log.Printf("%s: Error: %+v", msg, err)
+		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", keyLen))
 		return errors.Wrap(err, msg)
 	}
 
 	n, err = ar.Write(value)
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, valueLen)
-		log.Printf("%s: Error: %+v", msg, err)
+		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", valueLen))
 		return errors.Wrap(err, msg)
 	}
 	return err
 }
 
-func (exp *Exporter) printStats() {
+func (es *ExporterSession) printStats(wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	var totalKeysRead, totalBytesRead int64
 	var totalKeysLastPrinted int64
-	for stat := range exp.readerStatChan {
+	for stat := range es.readerStatChan {
 		totalBytesRead += stat.bytesRead
 		totalKeysRead += stat.keysRead
 		if totalKeysRead-totalKeysLastPrinted > 1_000_000 {
-			log.Printf("PROGRESS: Read %d keys, %d bytes so far", totalKeysRead, totalBytesRead)
+			es.logger.Info("Progress", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
 			totalKeysLastPrinted = totalKeysRead
 		}
 	}
-	log.Printf("FINAL: Read %d keys, %d bytes so far", totalKeysRead, totalBytesRead)
+	es.logger.Info("Session total", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
 }
 
-func (exp *Exporter) dbReader(thread int) (err error) {
+func (es *ExporterSession) dbReader(thread int) (err error) {
 
 	totalKeysRead := 0
 	totalKeysArchived := 0
-	log.Printf("targetURL= %s", exp.targetURL)
-	ar, err := archive.NewArchive(exp.targetURL, "fdb", ".records",
-		common.Compress(false),
+	es.logger.Info("Exporting to", zap.String("targetURL", es.targetURL))
+	ar, err := archive.NewArchive(es.targetURL, "fdb", ".records",
+		common.Compress(es.compress),
 		common.BufferSize(0),
-		common.Logger(exp.logger))
+		common.Logger(es.logger))
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create archive file")
 	}
+	defer ar.Close()
 
-	for keyRange := range exp.readerKeysChan {
-		txn, err := exp.db.CreateTransaction()
+	for keyRange := range es.readerKeysChan {
+		txn, err := es.db.CreateTransaction()
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create fdb transaction")
 		}
@@ -131,6 +109,9 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 		bytesRead := int64(0)
 		lastReadKey, endKey := keyRange.FDBRangeKeys()
 		batchReadLimit := 1_000_000
+		if es.samplingMode {
+			batchReadLimit = 100
+		}
 	Fetch:
 		for {
 			fKey := txn.GetRange(keyRange, fdb.RangeOptions{Limit: batchReadLimit, Mode: fdb.StreamingModeSerial})
@@ -146,12 +127,12 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 					txn.Commit()
 					if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
 
-						exp.logger.Info("Txn limit hit, restarting txn",
+						es.logger.Info("Txn limit hit, restarting txn",
 							zap.Int("after", keysReadInOneTxn))
 						// don't print key. Don't assume key is utf8 string
 						// zap.String("key", lastReadKey.FDBKey().String()))
 
-						txn, err = exp.db.CreateTransaction()
+						txn, err = es.db.CreateTransaction()
 						if err != nil {
 							return errors.Wrapf(err, "Unable to create fdb transaction")
 						}
@@ -162,7 +143,7 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 					}
 					return errors.Wrapf(err, "Unable to create fdb transaction")
 				}
-				if keysReadInOneTxn == 0 && bytes.Equal(lastReadKey.FDBKey(), kv.Key) {
+				if keysReadInOneTxn == 0 && keysRead != 0 && bytes.Equal(lastReadKey.FDBKey(), kv.Key) {
 					// When retrying transactions, we don't have a way to ask for
 					// starting from the 'next' key because we don't know what the next key is.
 					// We will need to give the same key as the beginKey for next try,
@@ -174,14 +155,23 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 				keysReadInOneTxn++
 				keysReadInOneBatch++
 				bytesRead += int64(len(kv.Key) + len(kv.Value))
-				saveRecord(ar, kv.Key, kv.Value)
+				err = es.saveRecord(ar, kv.Key, kv.Value)
+				if err != nil {
+					es.logger.Error("saveRecord failed",
+						zap.Int("after", keysReadInOneBatch),
+						zap.Int("total", keysRead),
+						zap.Error(err))
+					return errors.Wrapf(err, "Unable to save data locally")
+				}
 				lastReadKey = kv.Key
 				totalKeysRead++
 			}
 
-			if keysReadInOneBatch >= batchReadLimit {
+			if keysReadInOneBatch >= batchReadLimit && !es.samplingMode {
 				// there might be more left.
-				exp.logger.Info("Batch limit hit, starting another batch",
+				// in es.samplingMode though, we stop after one "smaller" batch.
+				// See override of batchReadLimit above
+				es.logger.Info("Batch limit hit, starting another batch",
 					zap.Int("after", keysReadInOneBatch),
 					zap.Int("total", keysRead))
 				keysReadInOneBatch = 0
@@ -193,7 +183,7 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 		}
 		// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
 		txn.Commit()
-		exp.readerStatChan <- readerStat{keysRead: int64(keysRead), bytesRead: int64(bytesRead)}
+		es.readerStatChan <- readerStat{keysRead: int64(keysRead), bytesRead: int64(bytesRead)}
 		keysRead, bytesRead = 0, 0 // reset to avoid double counting
 		if totalKeysRead-totalKeysArchived > 1_000_000 {
 			// Rotate every 1 million keys
@@ -204,76 +194,13 @@ func (exp *Exporter) dbReader(thread int) (err error) {
 			}
 		}
 	}
+	err = ar.Close()
+	if err != nil {
+		return errors.Wrapf(err, "Unable to close archive file")
+	}
+	es.logger.Warn("FinalizedFiles from current thread", zap.Strings("files", ar.FinalizedFiles()))
+	es.results.Lock()
+	es.results.finalizedFiles = append(es.results.finalizedFiles, ar.FinalizedFiles()...)
+	es.results.Unlock()
 	return err
-}
-
-func (exp *Exporter) Export() error {
-
-	var boundaryKeys []fdb.Key
-	beginKey := fdb.Key("")
-
-	for {
-		bKeys, err := exp.db.LocalityGetBoundaryKeys(fdb.KeyRange{Begin: beginKey, End: fdb.Key("\xFF")},
-			1000, 0)
-		if err != nil {
-			return errors.Wrapf(err, "Error querying LocalityGetBoundaryKeys")
-		}
-		if len(bKeys) > 1 ||
-			// we must get at least one additional key than what we passed in
-			// only keys from position 1 and later is really new
-			// except for the boundary case when we first pass in '' as beginKey
-			// In that rare case the DB only has one key in total, a single key
-			// would return to us and we should still consider it a valid one to
-			// save. That boundary case is the expression below.
-			(len(boundaryKeys) == 0 && len(bKeys) == 1) {
-
-			log.Printf("%+v", bKeys)
-			beginKey = bKeys[len(bKeys)-1].FDBKey()
-			log.Printf("Last key is %+v", beginKey)
-
-			boundaryKeys = append(boundaryKeys, bKeys...)
-		} else {
-			break
-		}
-	}
-	log.Printf("All keys: %+v", boundaryKeys)
-
-	var wg sync.WaitGroup
-	readerThreads := 10
-
-	log.Printf("Starting %d reader threads", readerThreads)
-	for i := 0; i < readerThreads; i++ {
-		wg.Add(1)
-		go func(threadNum int, wg *sync.WaitGroup) {
-			defer wg.Done()
-			err := exp.dbReader(threadNum)
-			if err != nil {
-				log.Printf("ERROR in dbReader thread: %+v", err) // Print before goroutine exists
-			}
-		}(i, &wg)
-	}
-
-	// Start work feeder
-	wg.Add(1)
-	go func(wg *sync.WaitGroup) {
-		wg.Done()
-		for i, beginKey := range boundaryKeys {
-			var endKey fdb.Key
-			if i == len(boundaryKeys)-1 { // are we on last key?
-				endKey = fdb.Key("\xFF")
-			} else {
-				endKey = boundaryKeys[i+1]
-			}
-			exp.readerKeysChan <- fdb.KeyRange{Begin: beginKey, End: endKey}
-		}
-		close(exp.readerKeysChan)
-	}(&wg)
-
-	log.Printf("Waiting for all threads to finish")
-	wg.Wait()
-	close(exp.readerStatChan)
-
-	// Exporter object is only usable once because of all the goroutine magic
-	exp.readerKeysChan, exp.readerStatChan = nil, nil
-	return nil
 }

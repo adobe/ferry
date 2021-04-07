@@ -14,7 +14,6 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -48,7 +47,11 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Usage() // When run without any sub-commands, print help
+		err := cmd.Usage() // When run without any sub-commands, print help
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	},
 }
 
@@ -74,11 +77,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profilingRequested, "profile",
 		"", "mem|cpu (Go performance profiling)")
 
-	rootCmd.PersistentFlags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
-
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to (applies to `serve` and `export` commands")
+
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -90,32 +93,71 @@ func initConfig() {
 		// Find home directory.
 		home, err := homedir.Dir()
 		if err != nil {
-			fmt.Println(err)
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Printf("Error finding home directory: %+v\n", err)
 			os.Exit(1)
 		}
 
 		// Search config in home directory with name ".ferry" (without extension).
 		viper.AddConfigPath(home)
+		viper.AddConfigPath(".")
 		viper.SetConfigName(".ferry")
 	}
+	viper.SetDefault("port", 8001)
+	viper.SetDefault("threads", 10)
 
 	viper.AutomaticEnv() // read in environment variables that match
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
+		// CAN'T USE ZAP - Logger not initilized yet
+		fmt.Printf("Using config file: %+v\n", viper.ConfigFileUsed())
+	}
+
+	for _, v := range []string{"port"} { // PERSISTENT FLAGS SET AT ROOT
+		if pf := rootCmd.PersistentFlags().Lookup(v); pf != nil {
+			err := viper.BindPFlag(v, pf)
+			if err != nil {
+				// CAN'T USE ZAP - Logger not initilized yet
+				fmt.Printf("Error from BindPFlag (rootCmd): %+v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Println("Unknown flag ", v)
+			os.Exit(1)
+		}
+	}
+
+	// FLAGS SPECIFIC TO EXPORT
+	for _, v := range []string{"dryrun", "sample", "compress", "threads", "collect"} {
+		if pf := exportCmd.Flags().Lookup(v); pf != nil {
+			err := viper.BindPFlag(v, pf)
+			if err != nil {
+				// CAN'T USE ZAP - Logger not initilized yet
+				fmt.Printf("Error from BindPFlag (exportCmd): %+v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Println("Unknown flag ", v)
+			os.Exit(1)
+		}
 	}
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {
 			ProfileStarted = profile.Start(p, profile.ProfilePath("."))
 		} else {
-			log.Fatalf("Unknown profiling mode '%s' requested", profilingRequested)
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Printf("Unknown profiling mode: %s\n", profilingRequested)
+			os.Exit(1)
 		}
 	}
 
 	zapLevel := zapcore.InfoLevel
 	if verbose {
+		fmt.Println("Verbose logging")
 		zapLevel = zapcore.DebugLevel
 	}
 	zapConfig := zap.Config{
@@ -131,6 +173,7 @@ func initConfig() {
 	var err error
 	gLogger, err = zapConfig.Build()
 	if err != nil {
+		// CAN'T USE ZAP - Logger not initilized yet
 		fmt.Println(err)
 		os.Exit(1)
 	}
