@@ -115,3 +115,6 @@ value-length = length & (1 << 18) - 1
 
 We may look at flatbuffer for output format, but that depends on subsequent usage needs
 
+# Architecture
+
+[[docs/ferry_arch.png|ferry arch diagram]]
