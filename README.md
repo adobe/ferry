@@ -117,4 +117,4 @@ We may look at flatbuffer for output format, but that depends on subsequent usag
 
 # Architecture
 
-[[docs/ferry_arch.png|ferry arch diagram]]
+![ferry arch diagram](docs/ferry_arch.png)
