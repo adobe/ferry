@@ -147,6 +147,7 @@ func initConfig() {
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {
+			fmt.Printf("Starting profile >%s<\n", profilingRequested)
 			ProfileStarted = profile.Start(p, profile.ProfilePath("."))
 		} else {
 			// CAN'T USE ZAP - Logger not initilized yet

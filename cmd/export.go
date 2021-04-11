@@ -79,6 +79,6 @@ func init() {
 	exportCmd.Flags().BoolP("sample", "m", false, "Sample - fetch only 1000 keys per range")
 	exportCmd.Flags().BoolP("compress", "c", false, "Compress export files (.lz4)")
 	exportCmd.Flags().IntP("threads", "t", 0, "How many threads per range")
-	exportCmd.Flags().StringP("collect", "", "", "Bring backup files to this host at this directory. Only applies to file:// targets")
+	exportCmd.Flags().StringP("collect", "", "", "Bring exported files to this host at this directory. Only applies to file:// targets")
 	exportCmd.Flags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
 }

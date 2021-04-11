@@ -18,11 +18,15 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type FerryClient interface {
-	GiveTimeOfTheDay(ctx context.Context, in *Time, opts ...grpc.CallOption) (*Time, error)
-	StartSession(ctx context.Context, in *Target, opts ...grpc.CallOption) (*SessionResponse, error)
+	StartExportSession(ctx context.Context, in *Target, opts ...grpc.CallOption) (*SessionResponse, error)
 	Export(ctx context.Context, opts ...grpc.CallOption) (Ferry_ExportClient, error)
-	EndSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error)
-	GetFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (Ferry_GetFileClient, error)
+	StopExportSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error)
+	GetExportedFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (Ferry_GetExportedFileClient, error)
+	RemoveExportedFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (*FileRequest, error)
+	EndExportSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error)
+	StartImportSession(ctx context.Context, in *Target, opts ...grpc.CallOption) (*SessionResponse, error)
+	Import(ctx context.Context, opts ...grpc.CallOption) (Ferry_ImportClient, error)
+	StopImportSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error)
 }
 
 type ferryClient struct {
@@ -33,18 +37,9 @@ func NewFerryClient(cc grpc.ClientConnInterface) FerryClient {
 	return &ferryClient{cc}
 }
 
-func (c *ferryClient) GiveTimeOfTheDay(ctx context.Context, in *Time, opts ...grpc.CallOption) (*Time, error) {
-	out := new(Time)
-	err := c.cc.Invoke(ctx, "/ferry.Ferry/GiveTimeOfTheDay", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *ferryClient) StartSession(ctx context.Context, in *Target, opts ...grpc.CallOption) (*SessionResponse, error) {
+func (c *ferryClient) StartExportSession(ctx context.Context, in *Target, opts ...grpc.CallOption) (*SessionResponse, error) {
 	out := new(SessionResponse)
-	err := c.cc.Invoke(ctx, "/ferry.Ferry/StartSession", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/ferry.Ferry/StartExportSession", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -85,21 +80,21 @@ func (x *ferryExportClient) CloseAndRecv() (*SessionResponse, error) {
 	return m, nil
 }
 
-func (c *ferryClient) EndSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error) {
+func (c *ferryClient) StopExportSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error) {
 	out := new(SessionResponse)
-	err := c.cc.Invoke(ctx, "/ferry.Ferry/EndSession", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/ferry.Ferry/StopExportSession", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *ferryClient) GetFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (Ferry_GetFileClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Ferry_ServiceDesc.Streams[1], "/ferry.Ferry/GetFile", opts...)
+func (c *ferryClient) GetExportedFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (Ferry_GetExportedFileClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Ferry_ServiceDesc.Streams[1], "/ferry.Ferry/GetExportedFile", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &ferryGetFileClient{stream}
+	x := &ferryGetExportedFileClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -109,16 +104,16 @@ func (c *ferryClient) GetFile(ctx context.Context, in *FileRequest, opts ...grpc
 	return x, nil
 }
 
-type Ferry_GetFileClient interface {
+type Ferry_GetExportedFileClient interface {
 	Recv() (*FileRequestResponse, error)
 	grpc.ClientStream
 }
 
-type ferryGetFileClient struct {
+type ferryGetExportedFileClient struct {
 	grpc.ClientStream
 }
 
-func (x *ferryGetFileClient) Recv() (*FileRequestResponse, error) {
+func (x *ferryGetExportedFileClient) Recv() (*FileRequestResponse, error) {
 	m := new(FileRequestResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -126,15 +121,89 @@ func (x *ferryGetFileClient) Recv() (*FileRequestResponse, error) {
 	return m, nil
 }
 
+func (c *ferryClient) RemoveExportedFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (*FileRequest, error) {
+	out := new(FileRequest)
+	err := c.cc.Invoke(ctx, "/ferry.Ferry/RemoveExportedFile", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ferryClient) EndExportSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error) {
+	out := new(SessionResponse)
+	err := c.cc.Invoke(ctx, "/ferry.Ferry/EndExportSession", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ferryClient) StartImportSession(ctx context.Context, in *Target, opts ...grpc.CallOption) (*SessionResponse, error) {
+	out := new(SessionResponse)
+	err := c.cc.Invoke(ctx, "/ferry.Ferry/StartImportSession", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ferryClient) Import(ctx context.Context, opts ...grpc.CallOption) (Ferry_ImportClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Ferry_ServiceDesc.Streams[2], "/ferry.Ferry/Import", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &ferryImportClient{stream}
+	return x, nil
+}
+
+type Ferry_ImportClient interface {
+	Send(*ImportRequest) error
+	CloseAndRecv() (*SessionResponse, error)
+	grpc.ClientStream
+}
+
+type ferryImportClient struct {
+	grpc.ClientStream
+}
+
+func (x *ferryImportClient) Send(m *ImportRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *ferryImportClient) CloseAndRecv() (*SessionResponse, error) {
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	m := new(SessionResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *ferryClient) StopImportSession(ctx context.Context, in *Session, opts ...grpc.CallOption) (*SessionResponse, error) {
+	out := new(SessionResponse)
+	err := c.cc.Invoke(ctx, "/ferry.Ferry/StopImportSession", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FerryServer is the server API for Ferry service.
 // All implementations must embed UnimplementedFerryServer
 // for forward compatibility
 type FerryServer interface {
-	GiveTimeOfTheDay(context.Context, *Time) (*Time, error)
-	StartSession(context.Context, *Target) (*SessionResponse, error)
+	StartExportSession(context.Context, *Target) (*SessionResponse, error)
 	Export(Ferry_ExportServer) error
-	EndSession(context.Context, *Session) (*SessionResponse, error)
-	GetFile(*FileRequest, Ferry_GetFileServer) error
+	StopExportSession(context.Context, *Session) (*SessionResponse, error)
+	GetExportedFile(*FileRequest, Ferry_GetExportedFileServer) error
+	RemoveExportedFile(context.Context, *FileRequest) (*FileRequest, error)
+	EndExportSession(context.Context, *Session) (*SessionResponse, error)
+	StartImportSession(context.Context, *Target) (*SessionResponse, error)
+	Import(Ferry_ImportServer) error
+	StopImportSession(context.Context, *Session) (*SessionResponse, error)
 	mustEmbedUnimplementedFerryServer()
 }
 
@@ -142,20 +211,32 @@ type FerryServer interface {
 type UnimplementedFerryServer struct {
 }
 
-func (UnimplementedFerryServer) GiveTimeOfTheDay(context.Context, *Time) (*Time, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GiveTimeOfTheDay not implemented")
-}
-func (UnimplementedFerryServer) StartSession(context.Context, *Target) (*SessionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method StartSession not implemented")
+func (UnimplementedFerryServer) StartExportSession(context.Context, *Target) (*SessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StartExportSession not implemented")
 }
 func (UnimplementedFerryServer) Export(Ferry_ExportServer) error {
 	return status.Errorf(codes.Unimplemented, "method Export not implemented")
 }
-func (UnimplementedFerryServer) EndSession(context.Context, *Session) (*SessionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method EndSession not implemented")
+func (UnimplementedFerryServer) StopExportSession(context.Context, *Session) (*SessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StopExportSession not implemented")
 }
-func (UnimplementedFerryServer) GetFile(*FileRequest, Ferry_GetFileServer) error {
-	return status.Errorf(codes.Unimplemented, "method GetFile not implemented")
+func (UnimplementedFerryServer) GetExportedFile(*FileRequest, Ferry_GetExportedFileServer) error {
+	return status.Errorf(codes.Unimplemented, "method GetExportedFile not implemented")
+}
+func (UnimplementedFerryServer) RemoveExportedFile(context.Context, *FileRequest) (*FileRequest, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveExportedFile not implemented")
+}
+func (UnimplementedFerryServer) EndExportSession(context.Context, *Session) (*SessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EndExportSession not implemented")
+}
+func (UnimplementedFerryServer) StartImportSession(context.Context, *Target) (*SessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StartImportSession not implemented")
+}
+func (UnimplementedFerryServer) Import(Ferry_ImportServer) error {
+	return status.Errorf(codes.Unimplemented, "method Import not implemented")
+}
+func (UnimplementedFerryServer) StopImportSession(context.Context, *Session) (*SessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StopImportSession not implemented")
 }
 func (UnimplementedFerryServer) mustEmbedUnimplementedFerryServer() {}
 
@@ -170,38 +251,20 @@ func RegisterFerryServer(s grpc.ServiceRegistrar, srv FerryServer) {
 	s.RegisterService(&Ferry_ServiceDesc, srv)
 }
 
-func _Ferry_GiveTimeOfTheDay_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Time)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(FerryServer).GiveTimeOfTheDay(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/ferry.Ferry/GiveTimeOfTheDay",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FerryServer).GiveTimeOfTheDay(ctx, req.(*Time))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Ferry_StartSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Ferry_StartExportSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Target)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(FerryServer).StartSession(ctx, in)
+		return srv.(FerryServer).StartExportSession(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/ferry.Ferry/StartSession",
+		FullMethod: "/ferry.Ferry/StartExportSession",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FerryServer).StartSession(ctx, req.(*Target))
+		return srv.(FerryServer).StartExportSession(ctx, req.(*Target))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -232,43 +295,141 @@ func (x *ferryExportServer) Recv() (*KeyRequest, error) {
 	return m, nil
 }
 
-func _Ferry_EndSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Ferry_StopExportSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Session)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(FerryServer).EndSession(ctx, in)
+		return srv.(FerryServer).StopExportSession(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/ferry.Ferry/EndSession",
+		FullMethod: "/ferry.Ferry/StopExportSession",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FerryServer).EndSession(ctx, req.(*Session))
+		return srv.(FerryServer).StopExportSession(ctx, req.(*Session))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Ferry_GetFile_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _Ferry_GetExportedFile_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(FileRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(FerryServer).GetFile(m, &ferryGetFileServer{stream})
+	return srv.(FerryServer).GetExportedFile(m, &ferryGetExportedFileServer{stream})
 }
 
-type Ferry_GetFileServer interface {
+type Ferry_GetExportedFileServer interface {
 	Send(*FileRequestResponse) error
 	grpc.ServerStream
 }
 
-type ferryGetFileServer struct {
+type ferryGetExportedFileServer struct {
 	grpc.ServerStream
 }
 
-func (x *ferryGetFileServer) Send(m *FileRequestResponse) error {
+func (x *ferryGetExportedFileServer) Send(m *FileRequestResponse) error {
 	return x.ServerStream.SendMsg(m)
+}
+
+func _Ferry_RemoveExportedFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FerryServer).RemoveExportedFile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/ferry.Ferry/RemoveExportedFile",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FerryServer).RemoveExportedFile(ctx, req.(*FileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Ferry_EndExportSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Session)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FerryServer).EndExportSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/ferry.Ferry/EndExportSession",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FerryServer).EndExportSession(ctx, req.(*Session))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Ferry_StartImportSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Target)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FerryServer).StartImportSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/ferry.Ferry/StartImportSession",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FerryServer).StartImportSession(ctx, req.(*Target))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Ferry_Import_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(FerryServer).Import(&ferryImportServer{stream})
+}
+
+type Ferry_ImportServer interface {
+	SendAndClose(*SessionResponse) error
+	Recv() (*ImportRequest, error)
+	grpc.ServerStream
+}
+
+type ferryImportServer struct {
+	grpc.ServerStream
+}
+
+func (x *ferryImportServer) SendAndClose(m *SessionResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *ferryImportServer) Recv() (*ImportRequest, error) {
+	m := new(ImportRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _Ferry_StopImportSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Session)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FerryServer).StopImportSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/ferry.Ferry/StopImportSession",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FerryServer).StopImportSession(ctx, req.(*Session))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 // Ferry_ServiceDesc is the grpc.ServiceDesc for Ferry service.
@@ -279,16 +440,28 @@ var Ferry_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*FerryServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "GiveTimeOfTheDay",
-			Handler:    _Ferry_GiveTimeOfTheDay_Handler,
+			MethodName: "StartExportSession",
+			Handler:    _Ferry_StartExportSession_Handler,
 		},
 		{
-			MethodName: "StartSession",
-			Handler:    _Ferry_StartSession_Handler,
+			MethodName: "StopExportSession",
+			Handler:    _Ferry_StopExportSession_Handler,
 		},
 		{
-			MethodName: "EndSession",
-			Handler:    _Ferry_EndSession_Handler,
+			MethodName: "RemoveExportedFile",
+			Handler:    _Ferry_RemoveExportedFile_Handler,
+		},
+		{
+			MethodName: "EndExportSession",
+			Handler:    _Ferry_EndExportSession_Handler,
+		},
+		{
+			MethodName: "StartImportSession",
+			Handler:    _Ferry_StartImportSession_Handler,
+		},
+		{
+			MethodName: "StopImportSession",
+			Handler:    _Ferry_StopImportSession_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -298,9 +471,14 @@ var Ferry_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "GetFile",
-			Handler:       _Ferry_GetFile_Handler,
+			StreamName:    "GetExportedFile",
+			Handler:       _Ferry_GetExportedFile_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "Import",
+			Handler:       _Ferry_Import_Handler,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "ferry.proto",

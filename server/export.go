@@ -14,66 +14,19 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"net"
 	"os"
 	"path"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/adobe/ferry/exporter/session"
 	ferry "github.com/adobe/ferry/rpc"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
-type Server struct {
-	logger   *zap.Logger
-	db       fdb.Database
-	sessions sync.Map
-	bindPort int
-	certFile string
-	keyFile  string
-	ferry.UnimplementedFerryServer
-}
-
-func NewServer(db fdb.Database, bindPort int, certFile, keyFile string, logger *zap.Logger) *Server {
-	return &Server{
-		logger:   logger,
-		db:       db,
-		bindPort: bindPort,
-		certFile: certFile,
-		keyFile:  keyFile,
-	}
-}
-
-func (exp *Server) ServeExport() (err error) {
-
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", exp.bindPort))
-	if err != nil {
-		exp.logger.Warn("Failed to listed on port", zap.Int("ca-file", exp.bindPort))
-		return errors.Wrapf(err, "Failed to listed on port %d", exp.bindPort)
-	}
-
-	creds, err := credentials.NewServerTLSFromFile(exp.certFile, exp.keyFile)
-	if err != nil {
-		exp.logger.Warn("Failed to read TLS credentials", zap.String("ca-file", exp.certFile))
-		return errors.Wrapf(err, "Failed to read TLS credentials from %s", exp.certFile)
-	}
-
-	grpcServer := grpc.NewServer(grpc.Creds(creds))
-	ferry.RegisterFerryServer(grpcServer, exp)
-	exp.logger.Info("Listening", zap.String("port", fmt.Sprintf("%+v", exp.bindPort)))
-	err = grpcServer.Serve(listener)
-	return err
-}
-
-func (exp *Server) StartSession(ctx context.Context, tgt *ferry.Target) (*ferry.SessionResponse, error) {
+func (exp *Server) StartExportSession(ctx context.Context, tgt *ferry.Target) (*ferry.SessionResponse, error) {
 
 	es, err := session.NewSession(exp.db,
 		tgt.TargetUrl,
@@ -87,7 +40,7 @@ func (exp *Server) StartSession(ctx context.Context, tgt *ferry.Target) (*ferry.
 	}
 
 	sessionID := es.GetSessionID()
-	exp.sessions.Store(sessionID, es)
+	exp.exportSessions.Store(sessionID, es)
 	exp.logger.Info("Created session", zap.String("sessionID", sessionID))
 
 	return &ferry.SessionResponse{SessionId: sessionID, Status: ferry.SessionResponse_SUCCESS}, err
@@ -96,7 +49,6 @@ func (exp *Server) StartSession(ctx context.Context, tgt *ferry.Target) (*ferry.
 func (exp *Server) Export(srv ferry.Ferry_ExportServer) error {
 	currentSessionID := ""
 	var es *session.ExporterSession
-	var ok bool
 
 	for {
 
@@ -128,18 +80,10 @@ func (exp *Server) Export(srv ferry.Ferry_ExportServer) error {
 			}
 			currentSessionID = req.SessionId
 
-			var esi interface{}
-			esi, ok = exp.sessions.LoadAndDelete(currentSessionID)
-			if !ok {
-				// Can't free `es`, not set yet
-				return errors.Errorf("Invalid session id %s", currentSessionID)
+			es, err = exp.popExportSession(currentSessionID)
+			if err != nil {
+				return err
 			}
-			es, ok = esi.(*session.ExporterSession)
-			if !ok {
-				// Can't free `es`, not set yet
-				return errors.Errorf("Invalid session id %s", currentSessionID)
-			}
-
 			exp.logger.Info("Start export stream", zap.String("sessionID", currentSessionID))
 		}
 		// At this point es will point to ExpoterSession we can use
@@ -154,31 +98,46 @@ func (exp *Server) Export(srv ferry.Ferry_ExportServer) error {
 		// Store it back. This is critical, we had *deleted* it earlier
 		// Storing it back is how we indicate it is now free to be acquired
 		// for cleanup
-		exp.sessions.Store(currentSessionID, es)
+		exp.exportSessions.Store(currentSessionID, es)
 	}
 
 	return nil
 }
-func (exp *Server) EndSession(ctx context.Context, fs *ferry.Session) (*ferry.SessionResponse, error) {
 
-	var es *session.ExporterSession
-	var ok bool
-
-	exp.logger.Info("Received EndSession", zap.String("sessionID", fs.SessionId))
+func (exp *Server) popExportSession(sessionID string) (es *session.ExporterSession, err error) {
 
 	var esi interface{}
-	esi, ok = exp.sessions.LoadAndDelete(fs.SessionId)
+	var ok bool
+
+	esi, ok = exp.exportSessions.LoadAndDelete(sessionID)
 	if !ok {
-		return nil, errors.Errorf("Invalid session id OR Session is in use - %s", fs.SessionId)
+		return nil, errors.Errorf("Invalid session id OR Session is in use - %s", sessionID)
 	}
 	es, ok = esi.(*session.ExporterSession)
 	if !ok {
-		return nil, errors.Errorf("Corrupted tracker for session id %s", fs.SessionId)
+		return nil, errors.Errorf("Corrupted tracker for session id %s", sessionID)
 	}
+	return es, nil
+}
+func (exp *Server) StopExportSession(ctx context.Context, fs *ferry.Session) (*ferry.SessionResponse, error) {
+
+	var es *session.ExporterSession
+
+	exp.logger.Info("Received StopSession", zap.String("sessionID", fs.SessionId))
+
+	es, err := exp.popExportSession(fs.SessionId)
+	if err != nil {
+		return nil, err
+	}
+	// Very Import: Release session after use
+	// "release" is done by putting it back in map
+	// else the session will be GC-ed.
+	defer exp.exportSessions.Store(fs.SessionId, es)
 
 	exp.logger.Debug("Releasing resources", zap.String("sessionID", fs.SessionId))
 	finalPaths := es.Finalize()
 	exp.logger.Info("Released resources", zap.String("sessionID", fs.SessionId))
+
 	return &ferry.SessionResponse{
 		SessionId:      fs.SessionId,
 		Status:         ferry.SessionResponse_SUCCESS,
@@ -186,12 +145,47 @@ func (exp *Server) EndSession(ctx context.Context, fs *ferry.Session) (*ferry.Se
 	}, nil
 }
 
-func (exp *Server) GiveTimeOfTheDay(ctx context.Context, clientTime *ferry.Time) (*ferry.Time, error) {
+func (exp *Server) EndExportSession(ctx context.Context, fs *ferry.Session) (*ferry.SessionResponse, error) {
 
-	return &ferry.Time{Ts: time.Now().UnixNano()}, nil
+	var es *session.ExporterSession
+
+	exp.logger.Info("Received EndSession", zap.String("sessionID", fs.SessionId))
+
+	es, err := exp.popExportSession(fs.SessionId)
+	if err != nil {
+		return nil, err
+	}
+	// Very Import: this (EndSession) is the only situation
+	// a 'pop' is not followed by a
+	// 	"defer exp.sessions.Store(fr.SessionId, es)"
+
+	exp.logger.Debug("Releasing resources", zap.String("sessionID", fs.SessionId))
+	finalPaths := es.Finalize()
+	exp.logger.Info("Released resources", zap.String("sessionID", fs.SessionId))
+
+	return &ferry.SessionResponse{
+		SessionId:      fs.SessionId,
+		Status:         ferry.SessionResponse_SUCCESS,
+		FinalizedFiles: finalPaths,
+	}, nil
 }
 
-func (exp *Server) GetFile(fr *ferry.FileRequest, resp ferry.Ferry_GetFileServer) (err error) {
+func (exp *Server) GetExportedFile(fr *ferry.FileRequest, resp ferry.Ferry_GetExportedFileServer) (err error) {
+
+	var es *session.ExporterSession
+	es, err = exp.popExportSession(fr.SessionId)
+	if err != nil {
+		return err
+	}
+	// Very Import: Release session after use
+	// "release" is done by putting it back in map
+	// else the session will be GC-ed.
+	defer exp.exportSessions.Store(fr.SessionId, es)
+
+	if !es.IsResultFile(fr.TargetUrl, fr.FileName) {
+		return errors.Errorf("The tuple (%s, %s) is not part of the result set",
+			fr.TargetUrl, fr.FileName)
+	}
 
 	if strings.Contains(fr.TargetUrl, "://") && !strings.HasPrefix(fr.TargetUrl, "file://") {
 		return errors.New("This method is only implemented for targets of file://")
@@ -201,7 +195,8 @@ func (exp *Server) GetFile(fr *ferry.FileRequest, resp ferry.Ferry_GetFileServer
 	if err != nil {
 		return errors.Wrapf(err, "Error opening node-local file: %s", fr.FileName)
 	}
-	buf := make([]byte, fr.BlockSize)
+	blockSize := 1_000_000
+	buf := make([]byte, blockSize)
 
 	blockNum := 0
 	eof := false
@@ -231,4 +226,33 @@ func (exp *Server) GetFile(fr *ferry.FileRequest, resp ferry.Ferry_GetFileServer
 		}
 	}
 	return nil
+}
+
+func (exp *Server) RemoveExportedFile(ctx context.Context, fr *ferry.FileRequest) (resp *ferry.FileRequest, err error) {
+
+	var es *session.ExporterSession
+	es, err = exp.popExportSession(fr.SessionId)
+	if err != nil {
+		return nil, err
+	}
+	// Very Import: Release session after use
+	// "release" is done by putting it back in map
+	// else the session will be GC-ed.
+	defer exp.exportSessions.Store(fr.SessionId, es)
+
+	if !es.IsResultFile(fr.TargetUrl, fr.FileName) {
+		return nil, errors.Errorf("The tuple (%s, %s) is not part of the result set",
+			fr.TargetUrl, fr.FileName)
+	}
+
+	if strings.Contains(fr.TargetUrl, "://") && !strings.HasPrefix(fr.TargetUrl, "file://") {
+		return nil, errors.New("This method is only implemented for targets of file://")
+	}
+	fr.TargetUrl = strings.TrimPrefix(fr.TargetUrl, "file://")
+	fullPath := path.Join(fr.TargetUrl, fr.FileName)
+	err = os.Remove(fullPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error removing file: %s", fullPath)
+	}
+	return fr, nil
 }

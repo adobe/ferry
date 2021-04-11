@@ -5,17 +5,27 @@ option go_package = "github.com/adobe/ferry/lib/ferry";
 package ferry;
 
 service Ferry {
-   rpc GiveTimeOfTheDay(Time) returns (Time) {}
-   rpc StartSession(Target) returns (SessionResponse) {}
+   rpc StartExportSession(Target) returns (SessionResponse) {}
    rpc Export(stream KeyRequest) returns (SessionResponse) {}
-   rpc EndSession(Session) returns (SessionResponse) {}
-   rpc GetFile(FileRequest) returns (stream FileRequestResponse) {}
+   rpc StopExportSession(Session) returns (SessionResponse) {}
+   rpc GetExportedFile(FileRequest) returns (stream FileRequestResponse) {}
+   rpc RemoveExportedFile(FileRequest) returns (FileRequest) {}
+   rpc EndExportSession(Session) returns (SessionResponse) {}
+
+   rpc StartImportSession(Target) returns (SessionResponse) {}
+   rpc Import(stream ImportRequest) returns (SessionResponse) {}
+   rpc StopImportSession(Session) returns (SessionResponse) {}
+}
+
+message ImportRequest {
+    string fileName = 1;
+    string session_id = 2; // session_id for the app level session
 }
 
 message FileRequest {
-    string target_url = 1;
-    string fileName = 2;
-    int32 blockSize = 3;
+    string session_id = 1; // session_id for the app level session
+    string target_url = 2;
+    string fileName = 3;
 }
 
 message FileRequestResponse {
@@ -61,8 +71,9 @@ message SessionResponse {
         FAILURE = 1;
     }
     enum SessionState {
-        OPEN = 0;
-        CLOSED = 1;
+        STARTED = 0;
+        STOPPED = 1;
+        ENDED = 2;
     }
     OpStatus status = 1; // status of operation
     SessionState state = 2; // final state of session

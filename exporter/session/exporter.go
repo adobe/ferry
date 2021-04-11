@@ -15,6 +15,7 @@ package session
 import (
 	"sync"
 
+	"github.com/adobe/blackhole/lib/archive/common"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -29,14 +30,17 @@ type ExporterSession struct {
 	sessionID      string
 	readerKeysChan chan fdb.KeyRange
 	readerStatChan chan readerStat
-	wg             *sync.WaitGroup
+	wgReaders      *sync.WaitGroup
+	wgStaters      *sync.WaitGroup
 	logger         *zap.Logger
 	samplingMode   bool
 	results        Results
+	// state          SessionState
 }
 
 type Results struct {
-	finalizedFiles []string
+	finalizedFiles   []string
+	finalizedDetails map[string]common.ArchiveFileStats
 	sync.Mutex
 	// To facilitate concurrent access to slice above
 	// since slice is updated at end-of-run only, the
@@ -44,13 +48,13 @@ type Results struct {
 }
 
 type readerStat struct {
-	keysRead  int64
-	bytesRead int64
+	keysRead   int64
+	bytesSaved int64
+	fileName   string
 }
 
 func NewSession(db fdb.Database, targetURL string, readerThreads int, compress bool, logger *zap.Logger, samplingMode bool) (es *ExporterSession, err error) {
 
-	var wg = &sync.WaitGroup{}
 	sessionID, err := uuid.NewRandom()
 	if err != nil {
 		es.logger.Warn("Failed to create a session ID", zap.Error(err))
@@ -66,17 +70,19 @@ func NewSession(db fdb.Database, targetURL string, readerThreads int, compress b
 		sessionID:      sessionIDstr,
 		readerKeysChan: make(chan fdb.KeyRange),
 		readerStatChan: make(chan readerStat),
-		wg:             wg,
+		wgReaders:      &sync.WaitGroup{},
+		wgStaters:      &sync.WaitGroup{},
 		samplingMode:   samplingMode,
 	}
 
+	es.results.finalizedDetails = make(map[string]common.ArchiveFileStats)
 	if es.readerThreads <= 0 {
 		es.readerThreads = 1
 	}
 
 	es.logger.Info("Starting", zap.Int("reader threads", es.readerThreads))
 	for i := 0; i < es.readerThreads; i++ {
-		wg.Add(1)
+		es.wgReaders.Add(1)
 		go func(threadNum int, wg *sync.WaitGroup) {
 			defer wg.Done()
 			err := es.dbReader(threadNum)
@@ -85,11 +91,11 @@ func NewSession(db fdb.Database, targetURL string, readerThreads int, compress b
 					zap.Int("thread", threadNum),
 					zap.Error(err))
 			}
-		}(i, wg)
+		}(i, es.wgReaders)
 	}
 
-	wg.Add(1)
-	go es.printStats(wg)
+	es.wgStaters.Add(1)
+	go es.printStats(es.wgStaters)
 	return es, nil
 }
 
@@ -97,13 +103,39 @@ func (es *ExporterSession) GetSessionID() string {
 	return es.sessionID
 }
 
+func (es *ExporterSession) IsResultFile(targetURL, fileName string) bool {
+	_, ok := es.results.finalizedDetails[fileName]
+	return ok && targetURL == es.targetURL
+}
+
 func (es *ExporterSession) Send(krange fdb.KeyRange) {
 	es.readerKeysChan <- krange
 }
 
 func (es *ExporterSession) Finalize() (finalPaths []string) {
-	close(es.readerKeysChan)
-	es.wg.Wait()
+
+	// ---------------------------------------------------
+	// WARNING: Order of channel close and .Wait()s are
+	// important
+	// ---------------------------------------------------
+	// first make sure workers are finished
+	// ---------------------------------------------------
+	if es.readerKeysChan != nil {
+		close(es.readerKeysChan)
+		es.wgReaders.Wait()
+		es.readerKeysChan = nil
+	}
+
+	// ---------------------------------------------------
+	// then make sure results/stats from workers
+	// are processed and printed
+	// ---------------------------------------------------
+	if es.readerStatChan != nil {
+		close(es.readerStatChan)
+		es.wgStaters.Wait()
+		es.readerStatChan = nil
+	}
+
 	es.logger.Warn("Finalize()", zap.Strings("files", es.results.finalizedFiles))
 	return es.results.finalizedFiles
 }
