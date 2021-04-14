@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -28,8 +29,10 @@ import (
 
 func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err error) {
 
-	exp.logger.Info("Starting session to", zap.Int("ranges", len(eg.kranges)), zap.String("host", eg.host))
-	resp, err := eg.conn.StartSession(context.Background(), &ferry.Target{
+	exp.logger.Info("Starting session to",
+		zap.Int("ranges", len(eg.kranges)),
+		zap.String("host", eg.host))
+	resp, err := eg.conn.StartExportSession(context.Background(), &ferry.Target{
 		TargetUrl:     exp.targetURL,
 		SamplingMode:  exp.samplingMode,
 		ReaderThreads: int32(exp.readerThreads),
@@ -63,12 +66,19 @@ func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err
 		exp.logger.Info(fmt.Sprintf("%+v", resp))
 
 	} else {
-		exp.logger.Info("DRYRUN", zap.Int("ranges", len(eg.kranges)), zap.String("host", eg.host))
+		exp.logger.Info("DRYRUN",
+			zap.Int("ranges", len(eg.kranges)),
+			zap.String("host", eg.host))
 	}
-	exp.logger.Info("Closing session to", zap.Int("ranges", len(eg.kranges)), zap.String("host", eg.host))
-	resp, err = eg.conn.EndSession(context.Background(), &ferry.Session{SessionId: sessionID})
+
+	exp.logger.Info("Closing session to",
+		zap.Int("ranges", len(eg.kranges)),
+		zap.String("host", eg.host))
+
+	resp, err = eg.conn.StopExportSession(context.Background(),
+		&ferry.Session{SessionId: sessionID})
 	if err != nil {
-		return errors.Wrapf(err, "Error from EndSession")
+		return errors.Wrapf(err, "Error from StopSession")
 	}
 	exp.logger.Info("Export saved", zap.Int("files", len(resp.FinalizedFiles)))
 
@@ -76,23 +86,26 @@ func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err
 		(!strings.Contains(exp.targetURL, "://") || // and it is a raw-path (not a s3:// type URL)
 			strings.HasPrefix(exp.targetURL, "file://")) { // OR it is a file:// URL
 
-		exp.logger.Info("Bringing files from each node", zap.String("dest", exp.collectDir))
+		exp.logger.Info("Bringing files from each node",
+			zap.String("dest", exp.collectDir))
 
 		for _, finalFile := range resp.FinalizedFiles {
 			exp.logger.Info("Downloading", zap.String("file", finalFile))
 			st := time.Now()
 			fileSize := int64(0)
-			gc, err := eg.conn.GetFile(context.Background(),
+			gc, err := eg.conn.GetExportedFile(context.Background(),
 				&ferry.FileRequest{
+					SessionId: sessionID,
 					TargetUrl: exp.targetURL,
 					FileName:  finalFile,
-					BlockSize: 1_000_000}) // Max 1 MB chunk. GRPC hard limit is 4 MB
+				}) // Max 1 MB chunk. GRPC hard limit is 4 MB
 			if err != nil {
 				return errors.Wrapf(err, "Error from EndSession")
 			}
-			fp, err := os.OpenFile(finalFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+			localPath := path.Join(exp.collectDir, finalFile)
+			fp, err := os.OpenFile(localPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 			if err != nil {
-				return errors.Wrapf(err, "Create of local file failed: %s", finalFile)
+				return errors.Wrapf(err, "Create of local file failed: %s", localPath)
 			}
 			for {
 				block, err := gc.Recv()
@@ -105,19 +118,35 @@ func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err
 				fileSize += int64(len(block.BlockData))
 				n, err := fp.Write(block.BlockData)
 				if err != nil || n != len(block.BlockData) {
-					return errors.Wrapf(err, "Write on block of file %s failed", finalFile)
+					return errors.Wrapf(err, "Write on block of file %s failed", localPath)
 				}
 			}
 			err = fp.Close()
 			if err != nil {
-				return errors.Wrapf(err, "Write on block of file %s failed", finalFile)
+				return errors.Wrapf(err, "Write on block of file %s failed", localPath)
 			}
 			exp.logger.Info("Downloaded",
 				zap.String("file", finalFile),
-				zap.Int64("fileSize", fileSize),
+				zap.Int64("file-size", fileSize),
+				zap.String("local-path", localPath),
 				zap.Duration("duration", time.Since(st)),
 			)
+			_, err = eg.conn.RemoveExportedFile(context.Background(),
+				&ferry.FileRequest{
+					SessionId: sessionID,
+					TargetUrl: exp.targetURL,
+					FileName:  finalFile,
+				})
+			if err != nil {
+				return errors.Wrapf(err, "Delete of source file %s failed", finalFile)
+			}
 		}
+	}
+
+	_, err = eg.conn.EndExportSession(context.Background(),
+		&ferry.Session{SessionId: sessionID})
+	if err != nil {
+		return errors.Wrapf(err, "Error from EndSession")
 	}
 
 	return nil

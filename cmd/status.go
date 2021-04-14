@@ -12,38 +12,40 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
-	"github.com/adobe/ferry/server"
+	"fmt"
+
+	"github.com/adobe/ferry/fdbstat"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
-// manageCmd represents the manage command
-var serveCmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Serve exporter grpc server",
-	Long:  `Serve exporter grpc server`,
+// statusCmd represents the manage command
+var statusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Print fdb status",
+	Long:  `Print fdb status`,
 
 	Run: func(cmd *cobra.Command, args []string) {
-
 		fdb.MustAPIVersion(620)
 		// Open the default database from the system cluster
 		db := fdb.MustOpenDefault()
-		srv := server.NewServer(db,
-			viper.GetInt("port"),
-			viper.GetString("tls.cert"),
-			viper.GetString("tls.privKey"),
-			gLogger)
-		err := srv.ServeImportExport()
+
+		status, err := fdbstat.GetStatus(db)
 		if err != nil {
-			gLogger.Fatal("Server failed to start", zap.Error(err))
+			gLogger.Fatal("Status failed", zap.Error(err))
 		}
+		fmt.Println(status)
+		hosts, err := fdbstat.GetNodesFromStatus(status)
+		if err != nil {
+			gLogger.Fatal("Status failed", zap.Error(err))
+		}
+		fmt.Println(hosts)
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(statusCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as

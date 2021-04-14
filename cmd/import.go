@@ -13,7 +13,11 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
+	"github.com/adobe/ferry/importer/client"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 // importCmd represents the import command
@@ -24,7 +28,29 @@ var importCmd = &cobra.Command{
 Import all data or a subset of keys to a target FoundationDB instance 
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		gLogger.Fatal("import is not implemented yet")
+		fdb.MustAPIVersion(620)
+		// Open the default database from the system cluster
+		db := fdb.MustOpenDefault()
+		exp, err := client.NewImporter(db,
+			storeURL, viper.GetInt("port"),
+			viper.GetString("tls.cert"),
+			client.Logger(gLogger),
+			client.Dryrun(viper.GetBool("dryrun")),
+			client.Sample(viper.GetBool("sample")),
+			client.WriterThreads(viper.GetInt("threads")),
+		)
+		if err != nil {
+			gLogger.Fatal("Error initializing exporter", zap.Error(err))
+		}
+		importPlan, err := exp.AssignTargets()
+		if err != nil {
+			gLogger.Fatal("Error assigning export nodes", zap.Error(err))
+		}
+
+		err = exp.ScheduleImport(importPlan)
+		if err != nil {
+			gLogger.Fatal("Error scheduling exports", zap.Error(err))
+		}
 	},
 }
 

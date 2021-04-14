@@ -28,17 +28,17 @@ import (
 const MAX_KEY_LEN = (1 << 14) - 1   // Max 14 bits for its length. We only need 10k. Buffer till 16k
 const MAX_VALUE_LEN = (1 << 18) - 1 // Max 18 bits for its length. We only need 100k. Buffer till 260k
 
-func (es *ExporterSession) saveRecord(ar archive.Archive, key, value []byte) (err error) {
+func (es *ExporterSession) saveRecord(ar archive.Archive, key, value []byte) (bytesTotal int, err error) {
 	const UINT32LEN = 4
 	var lbuf = make([]byte, UINT32LEN)
 
 	keyLen := len(key)
 	valueLen := len(value)
 	if keyLen > MAX_KEY_LEN {
-		return errors.Errorf("Sorry we only support key length up to %d bytes", MAX_KEY_LEN)
+		return 0, errors.Errorf("Sorry we only support key length up to %d bytes", MAX_KEY_LEN)
 	}
 	if valueLen > MAX_VALUE_LEN {
-		return errors.Errorf("Sorry we only support value length up to %d bytes", MAX_VALUE_LEN)
+		return 0, errors.Errorf("Sorry we only support value length up to %d bytes", MAX_VALUE_LEN)
 	}
 	recordLen := uint32(keyLen<<18 | valueLen)
 
@@ -48,23 +48,27 @@ func (es *ExporterSession) saveRecord(ar archive.Archive, key, value []byte) (er
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, UINT32LEN)
 		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", UINT32LEN))
-		return errors.Wrap(err, msg)
+		return 0, errors.Wrap(err, msg)
 	}
+	bytesTotal += n
 
 	n, err = ar.Write(key)
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, keyLen)
 		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", keyLen))
-		return errors.Wrap(err, msg)
+		return 0, errors.Wrap(err, msg)
 	}
+	bytesTotal += n
 
 	n, err = ar.Write(value)
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, valueLen)
 		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", valueLen))
-		return errors.Wrap(err, msg)
+		return 0, errors.Wrap(err, msg)
 	}
-	return err
+	bytesTotal += n
+
+	return bytesTotal, err
 }
 
 func (es *ExporterSession) printStats(wg *sync.WaitGroup) {
@@ -73,7 +77,7 @@ func (es *ExporterSession) printStats(wg *sync.WaitGroup) {
 	var totalKeysRead, totalBytesRead int64
 	var totalKeysLastPrinted int64
 	for stat := range es.readerStatChan {
-		totalBytesRead += stat.bytesRead
+		totalBytesRead += stat.bytesSaved
 		totalKeysRead += stat.keysRead
 		if totalKeysRead-totalKeysLastPrinted > 1_000_000 {
 			es.logger.Info("Progress", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
@@ -81,6 +85,11 @@ func (es *ExporterSession) printStats(wg *sync.WaitGroup) {
 		}
 	}
 	es.logger.Info("Session total", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
+	for k, v := range es.results.finalizedDetails {
+		es.logger.Info("SUMMARY",
+			zap.String("file", k),
+			zap.Int("content-length", v.ContentSize))
+	}
 }
 
 func (es *ExporterSession) dbReader(thread int) (err error) {
@@ -106,7 +115,7 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 		keysRead := 0
 		keysReadInOneTxn := 0
 		keysReadInOneBatch := 0
-		bytesRead := int64(0)
+		bytesSaved := int64(0)
 		lastReadKey, endKey := keyRange.FDBRangeKeys()
 		batchReadLimit := 1_000_000
 		if es.samplingMode {
@@ -154,8 +163,10 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 				keysRead++
 				keysReadInOneTxn++
 				keysReadInOneBatch++
-				bytesRead += int64(len(kv.Key) + len(kv.Value))
-				err = es.saveRecord(ar, kv.Key, kv.Value)
+				if len(kv.Key) > 1000 {
+					es.logger.Warn("Invalid-key", zap.Int("keyLen", len(kv.Key)))
+				}
+				n, err := es.saveRecord(ar, kv.Key, kv.Value)
 				if err != nil {
 					es.logger.Error("saveRecord failed",
 						zap.Int("after", keysReadInOneBatch),
@@ -163,6 +174,7 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 						zap.Error(err))
 					return errors.Wrapf(err, "Unable to save data locally")
 				}
+				bytesSaved += int64(n)
 				lastReadKey = kv.Key
 				totalKeysRead++
 			}
@@ -183,8 +195,12 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 		}
 		// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
 		txn.Commit()
-		es.readerStatChan <- readerStat{keysRead: int64(keysRead), bytesRead: int64(bytesRead)}
-		keysRead, bytesRead = 0, 0 // reset to avoid double counting
+		es.readerStatChan <- readerStat{
+			keysRead:   int64(keysRead),
+			bytesSaved: int64(bytesSaved),
+			fileName:   ar.Name(),
+		}
+		keysRead, bytesSaved = 0, 0 // reset to avoid double counting
 		if totalKeysRead-totalKeysArchived > 1_000_000 {
 			// Rotate every 1 million keys
 			totalKeysArchived = totalKeysRead
@@ -198,9 +214,13 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 	if err != nil {
 		return errors.Wrapf(err, "Unable to close archive file")
 	}
-	es.logger.Warn("FinalizedFiles from current thread", zap.Strings("files", ar.FinalizedFiles()))
 	es.results.Lock()
-	es.results.finalizedFiles = append(es.results.finalizedFiles, ar.FinalizedFiles()...)
+	finalizedFiles, finalizedDetails := ar.FinalizedFiles()
+
+	es.results.finalizedFiles = append(es.results.finalizedFiles, finalizedFiles...)
+	for k, v := range finalizedDetails {
+		es.results.finalizedDetails[k] = v
+	}
 	es.results.Unlock()
 	return err
 }
