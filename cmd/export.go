@@ -14,7 +14,7 @@ package cmd
 
 import (
 	"github.com/adobe/ferry/exporter/client"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/adobe/ferry/finder"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -29,10 +29,13 @@ to one of the possible stores - a local file-system folder, Azure blobstore or A
 Export is not done in a single transaction and that implies you should only do this
 if your data is static or you don't care for it being a point-in-time snapshot`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fdb.MustAPIVersion(620)
-		// Open the default database from the system cluster
-		db := fdb.MustOpenDefault()
-		exp, err := client.NewExporter(db,
+
+		finder, err := finder.NewFinder(gFDB, finder.Logger(gLogger))
+		if err != nil {
+			gLogger.Fatal("Error initializing finder", zap.Error(err))
+		}
+
+		exp, err := client.NewExporter(gFDB,
 			storeURL, viper.GetInt("port"),
 			viper.GetString("tls.cert"),
 			client.Logger(gLogger),
@@ -45,11 +48,11 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 		if err != nil {
 			gLogger.Fatal("Error initializing exporter", zap.Error(err))
 		}
-		bKeys, err := exp.GetBoundaryKeys()
+		bKeys, err := finder.GetBoundaryKeys()
 		if err != nil {
 			gLogger.Fatal("Error fetching boundary keys", zap.Error(err))
 		}
-		partitionMap, err := exp.GetLocations(bKeys)
+		partitionMap, err := finder.GetLocations(bKeys)
 		if err != nil {
 			gLogger.Fatal("Error fetching locations", zap.Error(err))
 		}

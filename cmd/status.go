@@ -15,7 +15,6 @@ import (
 	"fmt"
 
 	"github.com/adobe/ferry/fdbstat"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -27,11 +26,7 @@ var statusCmd = &cobra.Command{
 	Long:  `Print fdb status`,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		fdb.MustAPIVersion(620)
-		// Open the default database from the system cluster
-		db := fdb.MustOpenDefault()
-
-		status, err := fdbstat.GetStatus(db)
+		status, err := fdbstat.GetStatus(gFDB)
 		if err != nil {
 			gLogger.Fatal("Status failed", zap.Error(err))
 		}

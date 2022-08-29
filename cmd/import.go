@@ -14,7 +14,6 @@ package cmd
 
 import (
 	"github.com/adobe/ferry/importer/client"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -28,10 +27,7 @@ var importCmd = &cobra.Command{
 Import all data or a subset of keys to a target FoundationDB instance 
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-		fdb.MustAPIVersion(620)
-		// Open the default database from the system cluster
-		db := fdb.MustOpenDefault()
-		exp, err := client.NewImporter(db,
+		exp, err := client.NewImporter(gFDB,
 			storeURL, viper.GetInt("port"),
 			viper.GetString("tls.cert"),
 			client.Logger(gLogger),

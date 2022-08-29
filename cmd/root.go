@@ -14,9 +14,12 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 	"os"
 
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	homedir "github.com/mitchellh/go-homedir"
+	"github.com/pkg/errors"
 	"github.com/pkg/profile"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -82,6 +85,59 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
 	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to (applies to `serve` and `export` commands")
 
+}
+
+var gFDB fdb.Database
+var gFDBinitalized bool
+
+func initFDB() {
+	var err error
+
+	if !gFDBinitalized {
+
+		fdb.MustAPIVersion(710)
+
+		tlsConfig := viper.Get("tls_fdb")
+		if v, ok := tlsConfig.(map[string]interface{}); ok && v != nil {
+			no := fdb.Options()
+			// verifyOptions := "O=Adobe, Inc., CN=fdb.adobe.net"
+			verifyOptions := "Check.Valid=0"
+			err = no.SetTLSVerifyPeers([]byte(verifyOptions))
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set verify options to >%s<: %w", verifyOptions, err))
+			}
+			certFile, ok := v["cert"].(string)
+			if !ok || certFile == "" {
+				log.Fatalf("%+v", errors.New("\"tls\" key must include a string subkey \"cert\""))
+			}
+			err = no.SetTLSCertPath(certFile)
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set cert path to %s: %w", certFile, err))
+			}
+			gLogger.Debug("Setting cert file to", zap.String("file", certFile))
+			privKeyFile, ok := v["privkey"].(string)
+			if !ok || privKeyFile == "" {
+				log.Fatalf("%+v", errors.New("\"tls\" key must include a string subkey \"privkey\""))
+			}
+			err = no.SetTLSKeyPath(privKeyFile)
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set private key path to %s: %w", privKeyFile, err))
+			}
+			gLogger.Debug("Setting private key file to", zap.String("file", privKeyFile))
+
+			caFile, ok := v["ca"].(string)
+			if !ok || caFile == "" {
+				log.Fatalf("%+v", errors.New("\"tls\" key must include a string subkey \"ca\""))
+			}
+			err = no.SetTLSCaPath(caFile)
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set ca file path to %s: %w", caFile, err))
+			}
+			gLogger.Debug("Setting CA file to", zap.String("file", caFile))
+		}
+		gFDB = fdb.MustOpenDefault()
+		gFDBinitalized = true
+	}
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -178,4 +234,6 @@ func initConfig() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+
+	initFDB()
 }

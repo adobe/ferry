@@ -13,7 +13,6 @@ package cmd
 
 import (
 	"github.com/adobe/ferry/server"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -27,10 +26,7 @@ var serveCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		fdb.MustAPIVersion(620)
-		// Open the default database from the system cluster
-		db := fdb.MustOpenDefault()
-		srv := server.NewServer(db,
+		srv := server.NewServer(gFDB,
 			viper.GetInt("port"),
 			viper.GetString("tls.cert"),
 			viper.GetString("tls.privKey"),
