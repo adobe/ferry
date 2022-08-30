@@ -15,6 +15,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/adobe/ferry/exporter/session"
 	"github.com/adobe/ferry/finder"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/pkg/errors"
@@ -40,7 +41,7 @@ var statLocalCmd = &cobra.Command{
 		if err != nil {
 			gLogger.Fatal("Error fetching locations", zap.Error(err))
 		}
-		dbSize, err := calculateDBSize(gFDB, pmap)
+		dbSize, err := calculateRowCount(gFDB, pmap)
 		if err != nil {
 			gLogger.Fatal("Error fetching estimated size", zap.Error(err))
 		}
@@ -70,6 +71,29 @@ func calculateDBSize(db fdb.Database, pmap *finder.PartitionMap) (totalSize int6
 	}
 	txn.Commit()
 	return totalSize, nil
+}
+
+func calculateRowCount(db fdb.Database, pmap *finder.PartitionMap) (totalRows int64, err error) {
+
+	es, err := session.NewSession(db,
+		"",
+		40,
+		false,
+		gLogger,
+		false)
+	if err != nil {
+		gLogger.Warn("Failed to create a session ID", zap.Error(err))
+		return 0, errors.Wrap(err, "Failed to create a session ID")
+	}
+
+	for _, v := range pmap.Ranges {
+		//gLogger.Info("Attempt", zap.ByteString("begin", v.Krange.Begin.FDBKey()),
+		//	zap.ByteString("end", v.Krange.End.FDBKey()),
+		//	zap.String("hosts", fmt.Sprintf("%+v", v.Hosts)))
+		es.Send(v.Krange)
+	}
+	es.Finalize()
+	return 0, nil
 }
 
 func init() {

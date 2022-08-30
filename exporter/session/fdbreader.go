@@ -96,20 +96,28 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 
 	totalKeysRead := 0
 	totalKeysArchived := 0
-	es.logger.Info("Exporting to", zap.String("targetURL", es.targetURL))
-	ar, err := archive.NewArchive(es.targetURL, "fdb", ".records",
-		common.Compress(es.compress),
-		common.BufferSize(0),
-		common.Logger(es.logger))
-	if err != nil {
-		return errors.Wrapf(err, "Unable to create archive file")
+	var ar archive.Archive
+
+	if es.targetURL != "" { // ! Read-only mode
+		es.logger.Info("Exporting to", zap.String("targetURL", es.targetURL))
+		ar, err = archive.NewArchive(es.targetURL, "fdb", ".records",
+			common.Compress(es.compress),
+			common.BufferSize(0),
+			common.Logger(es.logger))
+		if err != nil {
+			return errors.Wrapf(err, "Unable to create archive file")
+		}
+		defer ar.Close()
 	}
-	defer ar.Close()
 
 	for keyRange := range es.readerKeysChan {
 		txn, err := es.db.CreateTransaction()
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create fdb transaction")
+		}
+		err = txn.Options().SetReadYourWritesDisable()
+		if err != nil {
+			return errors.Wrapf(err, "Unable to set transaction option")
 		}
 
 		keysRead := 0
@@ -117,7 +125,7 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 		keysReadInOneBatch := 0
 		bytesSaved := int64(0)
 		lastReadKey, endKey := keyRange.FDBRangeKeys()
-		batchReadLimit := 1_000_000
+		batchReadLimit := 10000
 		if es.samplingMode {
 			batchReadLimit = 100
 		}
@@ -145,6 +153,10 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 						if err != nil {
 							return errors.Wrapf(err, "Unable to create fdb transaction")
 						}
+						err = txn.Options().SetReadYourWritesDisable()
+						if err != nil {
+							return errors.Wrapf(err, "Unable to set transaction option")
+						}
 						keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
 						keysReadInOneTxn = 0
 						continue Fetch
@@ -166,15 +178,19 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 				if len(kv.Key) > 1000 {
 					es.logger.Warn("Invalid-key", zap.Int("keyLen", len(kv.Key)))
 				}
-				n, err := es.saveRecord(ar, kv.Key, kv.Value)
-				if err != nil {
-					es.logger.Error("saveRecord failed",
-						zap.Int("after", keysReadInOneBatch),
-						zap.Int("total", keysRead),
-						zap.Error(err))
-					return errors.Wrapf(err, "Unable to save data locally")
+				if ar != nil {
+					n, err := es.saveRecord(ar, kv.Key, kv.Value)
+					if err != nil {
+						es.logger.Error("saveRecord failed",
+							zap.Int("after", keysReadInOneBatch),
+							zap.Int("total", keysRead),
+							zap.Error(err))
+						return errors.Wrapf(err, "Unable to save data locally")
+					}
+					bytesSaved += int64(n)
+				} else {
+					bytesSaved += int64(len(kv.Key) + len(kv.Value))
 				}
-				bytesSaved += int64(n)
 				lastReadKey = kv.Key
 				totalKeysRead++
 			}
@@ -183,9 +199,19 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 				// there might be more left.
 				// in es.samplingMode though, we stop after one "smaller" batch.
 				// See override of batchReadLimit above
-				es.logger.Info("Batch limit hit, starting another batch",
+				es.logger.Debug("Batch limit hit, starting another batch",
 					zap.Int("after", keysReadInOneBatch),
 					zap.Int("total", keysRead))
+
+				txn, err = es.db.CreateTransaction()
+				if err != nil {
+					return errors.Wrapf(err, "Unable to create fdb transaction")
+				}
+				err = txn.Options().SetReadYourWritesDisable()
+				if err != nil {
+					return errors.Wrapf(err, "Unable to set transaction option")
+				}
+
 				keysReadInOneBatch = 0
 				keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
 				continue
@@ -195,32 +221,40 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 		}
 		// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
 		txn.Commit()
+		fileName := "[Data Discarded]"
+		if ar != nil {
+			fileName = ar.Name()
+		}
 		es.readerStatChan <- readerStat{
 			keysRead:   int64(keysRead),
 			bytesSaved: int64(bytesSaved),
-			fileName:   ar.Name(),
+			fileName:   fileName,
 		}
 		keysRead, bytesSaved = 0, 0 // reset to avoid double counting
 		if totalKeysRead-totalKeysArchived > 1_000_000 {
 			// Rotate every 1 million keys
 			totalKeysArchived = totalKeysRead
-			err = ar.Rotate()
-			if err != nil {
-				return errors.Wrapf(err, "Unable to rotate archive file")
+			if ar != nil {
+				err = ar.Rotate()
+				if err != nil {
+					return errors.Wrapf(err, "Unable to rotate archive file")
+				}
 			}
 		}
 	}
-	err = ar.Close()
-	if err != nil {
-		return errors.Wrapf(err, "Unable to close archive file")
-	}
-	es.results.Lock()
-	finalizedFiles, finalizedDetails := ar.FinalizedFiles()
+	if ar != nil {
+		err = ar.Close()
+		if err != nil {
+			return errors.Wrapf(err, "Unable to close archive file")
+		}
+		es.results.Lock()
+		finalizedFiles, finalizedDetails := ar.FinalizedFiles()
 
-	es.results.finalizedFiles = append(es.results.finalizedFiles, finalizedFiles...)
-	for k, v := range finalizedDetails {
-		es.results.finalizedDetails[k] = v
+		es.results.finalizedFiles = append(es.results.finalizedFiles, finalizedFiles...)
+		for k, v := range finalizedDetails {
+			es.results.finalizedDetails[k] = v
+		}
+		es.results.Unlock()
 	}
-	es.results.Unlock()
 	return err
 }
