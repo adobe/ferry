@@ -29,7 +29,7 @@ Import all data or a subset of keys to a target FoundationDB instance
 	Run: func(cmd *cobra.Command, args []string) {
 		exp, err := client.NewImporter(gFDB,
 			storeURL, viper.GetInt("port"),
-			viper.GetString("tls.cert"),
+			viper.GetString("tls_ferry.ca"),
 			client.Logger(gLogger),
 			client.Dryrun(viper.GetBool("dryrun")),
 			client.Sample(viper.GetBool("sample")),

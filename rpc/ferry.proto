@@ -65,6 +65,14 @@ message KeyRangeResponse {
     string file_url = 6; // only set on success
 }
 
+message FinalizedFile {
+    string  file_name = 1;
+    string  checksum = 4;
+    int64   content_size = 2;
+    int64   chunks_count = 3;
+    bool    shell_only = 5;
+}
+
 message SessionResponse {
     enum OpStatus {
         SUCCESS = 0;
@@ -79,7 +87,7 @@ message SessionResponse {
     SessionState state = 2; // final state of session
     string session_id = 3; // session_id for the app level session
     string error_details = 4; // only set on success
-    repeated string finalized_files = 5;
+    repeated FinalizedFile finalized_files = 5;
 }
 
 message Session {

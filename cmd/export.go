@@ -37,7 +37,7 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 
 		exp, err := client.NewExporter(gFDB,
 			storeURL, viper.GetInt("port"),
-			viper.GetString("tls.cert"),
+			viper.GetString("tls_ferry.ca"),
 			client.Logger(gLogger),
 			client.Dryrun(viper.GetBool("dryrun")),
 			client.Sample(viper.GetBool("sample")),

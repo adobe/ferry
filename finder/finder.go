@@ -14,6 +14,7 @@ package finder
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/pkg/errors"
@@ -78,8 +79,8 @@ func (exp *Finder) GetLocations(boundaryKeys []fdb.Key) (pmap *PartitionMap, err
 
 	// rangeLocation represents a set of hosts holding the given range.
 	type rangeLocationTemp struct {
-		krange fdb.KeyRange
-		hosts  fdb.FutureStringSlice
+		krange    fdb.KeyRange
+		addresses []string
 	}
 	var locationsTemp []rangeLocationTemp
 
@@ -95,9 +96,27 @@ func (exp *Finder) GetLocations(boundaryKeys []fdb.Key) (pmap *PartitionMap, err
 		} else {
 			endKey = boundaryKeys[i+1]
 		}
+		addresses, err := txn.LocalityGetAddressesForKey(beginKey).Get()
+		if err != nil {
+			txn.Commit()
+			if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
+				txn, err = exp.db.CreateTransaction()
+				if err != nil {
+					return nil, errors.Wrapf(err, "Unable to resume fdb transaction")
+				}
+			}
+			addresses, err = txn.LocalityGetAddressesForKey(beginKey).Get()
+			if err != nil {
+				return nil, errors.Wrapf(err, "LocalityGetAddressesForKey lookup failed!")
+			}
+		}
 		locationsTemp = append(locationsTemp, rangeLocationTemp{
-			krange: fdb.KeyRange{Begin: beginKey, End: endKey},
-			hosts:  txn.LocalityGetAddressesForKey(beginKey),
+			krange:    fdb.KeyRange{Begin: beginKey, End: endKey},
+			addresses: addresses,
+			// addresses: txn.LocalityGetAddressesForKey(beginKey),
+			// `hosts:` is just a future.
+			// helps send all Locality requests in parallel.
+			// Need to read `.Get()` it below before we timeout though...
 		})
 	}
 
@@ -105,22 +124,40 @@ func (exp *Finder) GetLocations(boundaryKeys []fdb.Key) (pmap *PartitionMap, err
 	var nodes = map[string]StorageGroup{}
 
 	for _, v := range locationsTemp {
-		v2, err := v.hosts.Get() // blocking now is OK
+		// v2, err := v.addresses.Get() // blocking now is OK
+		v2 := v.addresses
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to create fdb transaction")
+			return nil, errors.Wrapf(err, "Unable to get future's result")
 		}
+		hosts := []string{}
+		for _, v3 := range v2 {
+			hosts = append(hosts, strings.Split(v3, ":")[0])
+		}
+
+		/*
+			exp.logger.Debug("Found hosts",
+				zap.Any("addresses", v2),
+				zap.Any("hosts", hosts),
+				zap.ByteString("begin", v.krange.Begin.FDBKey()),
+				zap.ByteString("end", v.krange.End.FDBKey()))
+		*/
 
 		ranges = append(ranges, RangeLocation{
 			Krange: v.krange,
-			Hosts:  v2,
+			Hosts:  hosts,
 		})
-		for _, host := range v2 {
+		for _, host := range hosts {
 			node := nodes[host]
 			node.kranges = append(nodes[host].kranges, v.krange)
 			nodes[host] = node
 		}
 	}
 
+	/*
+		exp.logger.Debug("Location Summary",
+			zap.Any("ranges", ranges),
+			zap.Any("nodes", nodes))
+	*/
 	return &PartitionMap{Ranges: ranges, Nodes: nodes}, nil
 }
 

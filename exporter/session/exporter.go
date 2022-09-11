@@ -39,8 +39,8 @@ type ExporterSession struct {
 }
 
 type Results struct {
-	finalizedFiles   []string
-	finalizedDetails map[string]common.ArchiveFileStats
+	finalizedFiles   map[string]bool
+	finalizedDetails map[string]common.ArchiveFileDetails
 	sync.Mutex
 	// To facilitate concurrent access to slice above
 	// since slice is updated at end-of-run only, the
@@ -50,7 +50,7 @@ type Results struct {
 type readerStat struct {
 	keysRead   int64
 	bytesSaved int64
-	fileName   string
+	//fileName   string
 }
 
 func NewSession(db fdb.Database, targetURL string, readerThreads int, compress bool, logger *zap.Logger, samplingMode bool) (es *ExporterSession, err error) {
@@ -75,7 +75,8 @@ func NewSession(db fdb.Database, targetURL string, readerThreads int, compress b
 		samplingMode:   samplingMode,
 	}
 
-	es.results.finalizedDetails = make(map[string]common.ArchiveFileStats)
+	es.results.finalizedDetails = make(map[string]common.ArchiveFileDetails)
+	es.results.finalizedFiles = make(map[string]bool)
 	if es.readerThreads <= 0 {
 		es.readerThreads = 1
 	}
@@ -104,7 +105,7 @@ func (es *ExporterSession) GetSessionID() string {
 }
 
 func (es *ExporterSession) IsResultFile(targetURL, fileName string) bool {
-	_, ok := es.results.finalizedDetails[fileName]
+	_, ok := es.results.finalizedFiles[fileName]
 	return ok && targetURL == es.targetURL
 }
 
@@ -112,7 +113,7 @@ func (es *ExporterSession) Send(krange fdb.KeyRange) {
 	es.readerKeysChan <- krange
 }
 
-func (es *ExporterSession) Finalize() (finalPaths []string) {
+func (es *ExporterSession) Finalize() (finalFiles []common.ArchiveFileDetails) {
 
 	// ---------------------------------------------------
 	// WARNING: Order of channel close and .Wait()s are
@@ -136,6 +137,10 @@ func (es *ExporterSession) Finalize() (finalPaths []string) {
 		es.readerStatChan = nil
 	}
 
-	es.logger.Warn("Finalize()", zap.Strings("files", es.results.finalizedFiles))
-	return es.results.finalizedFiles
+	for _, v := range es.results.finalizedDetails {
+		finalFiles = append(finalFiles, v)
+	}
+
+	es.logger.Warn("Finalize()", zap.Any("files", finalFiles))
+	return finalFiles
 }

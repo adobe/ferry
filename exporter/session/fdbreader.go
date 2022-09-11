@@ -17,6 +17,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/adobe/blackhole/lib/archive"
 	"github.com/adobe/blackhole/lib/archive/common"
@@ -76,31 +77,38 @@ func (es *ExporterSession) printStats(wg *sync.WaitGroup) {
 
 	var totalKeysRead, totalBytesRead int64
 	var totalKeysLastPrinted int64
+	var startTime = time.Now()
 	for stat := range es.readerStatChan {
 		totalBytesRead += stat.bytesSaved
 		totalKeysRead += stat.keysRead
 		if totalKeysRead-totalKeysLastPrinted > 1_000_000 {
-			es.logger.Info("Progress", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
+			seconds := time.Since(startTime).Seconds()
+			es.logger.Info("Progress",
+				zap.Int64("keys", totalKeysRead),
+				zap.Int64("bytes", totalBytesRead),
+				zap.Int64("keys/s", int64((float64(totalKeysRead)/seconds))),
+				zap.Int64("bps", int64((float64(totalBytesRead)/seconds))),
+			)
+
 			totalKeysLastPrinted = totalKeysRead
 		}
 	}
 	es.logger.Info("Session total", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
 	for k, v := range es.results.finalizedDetails {
 		es.logger.Info("SUMMARY",
-			zap.String("file", k),
-			zap.Int("content-length", v.ContentSize))
+			zap.Any("range", k),
+			zap.Int("content-length", int(v.ChunksWritten)))
 	}
 }
 
 func (es *ExporterSession) dbReader(thread int) (err error) {
 
 	totalKeysRead := 0
-	totalKeysArchived := 0
-	var ar archive.Archive
 
-	if es.targetURL != "" { // ! Read-only mode
-		es.logger.Info("Exporting to", zap.String("targetURL", es.targetURL))
-		ar, err = archive.NewArchive(es.targetURL, "fdb", ".records",
+	es.logger.Info("Exporting to", zap.String("targetURL", es.targetURL))
+
+	for keyRange := range es.readerKeysChan {
+		ar, err := archive.NewArchive(es.targetURL, "fdb", ".records",
 			common.Compress(es.compress),
 			common.BufferSize(0),
 			common.Logger(es.logger))
@@ -108,9 +116,7 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 			return errors.Wrapf(err, "Unable to create archive file")
 		}
 		defer ar.Close()
-	}
 
-	for keyRange := range es.readerKeysChan {
 		txn, err := es.db.CreateTransaction()
 		if err != nil {
 			return errors.Wrapf(err, "Unable to create fdb transaction")
@@ -120,6 +126,7 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 			return errors.Wrapf(err, "Unable to set transaction option")
 		}
 
+		rangeIdentifier := fmt.Sprintf("%s-%s", keyRange.Begin.FDBKey(), keyRange.End.FDBKey())
 		keysRead := 0
 		keysReadInOneTxn := 0
 		keysReadInOneBatch := 0
@@ -221,38 +228,24 @@ func (es *ExporterSession) dbReader(thread int) (err error) {
 		}
 		// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
 		txn.Commit()
-		fileName := "[Data Discarded]"
-		if ar != nil {
-			fileName = ar.Name()
-		}
+		//fileName := ar.Name()
 		es.readerStatChan <- readerStat{
 			keysRead:   int64(keysRead),
 			bytesSaved: int64(bytesSaved),
-			fileName:   fileName,
+			//fileName:   fileName,
 		}
 		keysRead, bytesSaved = 0, 0 // reset to avoid double counting
-		if totalKeysRead-totalKeysArchived > 1_000_000 {
-			// Rotate every 1 million keys
-			totalKeysArchived = totalKeysRead
-			if ar != nil {
-				err = ar.Rotate()
-				if err != nil {
-					return errors.Wrapf(err, "Unable to rotate archive file")
-				}
-			}
-		}
-	}
-	if ar != nil {
+
 		err = ar.Close()
 		if err != nil {
 			return errors.Wrapf(err, "Unable to close archive file")
 		}
-		es.results.Lock()
-		finalizedFiles, finalizedDetails := ar.FinalizedFiles()
+		finalizedDetails := ar.FinalizedFiles()
 
-		es.results.finalizedFiles = append(es.results.finalizedFiles, finalizedFiles...)
-		for k, v := range finalizedDetails {
-			es.results.finalizedDetails[k] = v
+		es.results.Lock()
+		for _, v := range finalizedDetails {
+			es.results.finalizedDetails[rangeIdentifier] = v
+			es.results.finalizedFiles[v.FileName] = true
 		}
 		es.results.Unlock()
 	}

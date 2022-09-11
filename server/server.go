@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/reflection"
 )
 
 type Server struct {
@@ -55,18 +56,19 @@ func (exp *Server) ServeImportExport() (err error) {
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", exp.bindPort))
 	if err != nil {
-		exp.logger.Warn("Failed to listed on port", zap.Int("ca-file", exp.bindPort))
+		exp.logger.Warn("Failed to listed on port", zap.Int("port", exp.bindPort))
 		return errors.Wrapf(err, "Failed to listed on port %d", exp.bindPort)
 	}
 
 	creds, err := credentials.NewServerTLSFromFile(exp.certFile, exp.keyFile)
 	if err != nil {
-		exp.logger.Warn("Failed to read TLS credentials", zap.String("ca-file", exp.certFile))
+		exp.logger.Warn("Failed to read TLS credentials", zap.String("cert-file", exp.certFile))
 		return errors.Wrapf(err, "Failed to read TLS credentials from %s", exp.certFile)
 	}
 
 	grpcServer := grpc.NewServer(grpc.Creds(creds))
 	ferry.RegisterFerryServer(grpcServer, exp)
+	reflection.Register(grpcServer)
 	exp.logger.Info("Listening", zap.String("port", fmt.Sprintf("%+v", exp.bindPort)))
 	err = grpcServer.Serve(listener)
 	return err

@@ -13,13 +13,10 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
-	"fmt"
-
-	"github.com/adobe/ferry/exporter/session"
+	"github.com/adobe/ferry/fdbstat"
 	"github.com/adobe/ferry/finder"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
@@ -41,59 +38,19 @@ var statLocalCmd = &cobra.Command{
 		if err != nil {
 			gLogger.Fatal("Error fetching locations", zap.Error(err))
 		}
-		dbSize, err := calculateRowCount(gFDB, pmap)
+
+		srvy, err := fdbstat.NewSurveyor(gFDB, fdbstat.Logger(gLogger))
+		if err != nil {
+			gLogger.Fatal("Error initializing finder", zap.Error(err))
+		}
+
+		gLogger.Info("threads", zap.Int("threads", viper.GetInt("threads")))
+		dbSize, err := srvy.CalculateRowCount(pmap, viper.GetInt("threads"))
 		if err != nil {
 			gLogger.Fatal("Error fetching estimated size", zap.Error(err))
 		}
 		gLogger.Info("Total DB size", zap.Int64("size", dbSize))
 	},
-}
-
-func calculateDBSize(db fdb.Database, pmap *finder.PartitionMap) (totalSize int64, err error) {
-
-	txn, err := db.CreateTransaction()
-	for _, v := range pmap.Ranges {
-		if err != nil {
-			return 0, errors.Wrapf(err, "Unable to create fdb transaction")
-		}
-		gLogger.Info("Attempt", zap.ByteString("begin", v.Krange.Begin.FDBKey()),
-			zap.ByteString("end", v.Krange.End.FDBKey()),
-			zap.String("hosts", fmt.Sprintf("%+v", v.Hosts)))
-		size, err := txn.GetEstimatedRangeSizeBytes(v.Krange).Get()
-		if err != nil {
-			return 0, errors.Wrapf(err, "Unable to create fdb transaction")
-		}
-		totalSize += size
-		gLogger.Info("Range", zap.ByteString("begin", v.Krange.Begin.FDBKey()),
-			zap.ByteString("end", v.Krange.End.FDBKey()),
-			zap.Int64("size", size),
-			zap.String("hosts", fmt.Sprintf("%+v", v.Hosts)))
-	}
-	txn.Commit()
-	return totalSize, nil
-}
-
-func calculateRowCount(db fdb.Database, pmap *finder.PartitionMap) (totalRows int64, err error) {
-
-	es, err := session.NewSession(db,
-		"",
-		40,
-		false,
-		gLogger,
-		false)
-	if err != nil {
-		gLogger.Warn("Failed to create a session ID", zap.Error(err))
-		return 0, errors.Wrap(err, "Failed to create a session ID")
-	}
-
-	for _, v := range pmap.Ranges {
-		//gLogger.Info("Attempt", zap.ByteString("begin", v.Krange.Begin.FDBKey()),
-		//	zap.ByteString("end", v.Krange.End.FDBKey()),
-		//	zap.String("hosts", fmt.Sprintf("%+v", v.Hosts)))
-		es.Send(v.Krange)
-	}
-	es.Finalize()
-	return 0, nil
 }
 
 func init() {
@@ -106,5 +63,7 @@ func init() {
 	// config file useless)
 	// ------------------------------------------------------------------------
 	statLocalCmd.Flags().BoolP("sample", "m", false, "Sample - fetch only 1000 keys per range")
-	statLocalCmd.Flags().IntP("threads", "t", 0, "How many threads per range")
+	statLocalCmd.Flags().IntP("threads", "t", 0, "How many threads to read in parallel")
+	statLocalCmd.Flags().IntP("checksum", "c", 0, "Checksum all data")
+	statLocalCmd.Flags().IntP("summary", "s", 0, "Report only final db level summary")
 }

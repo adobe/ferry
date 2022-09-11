@@ -28,8 +28,8 @@ var serveCmd = &cobra.Command{
 
 		srv := server.NewServer(gFDB,
 			viper.GetInt("port"),
-			viper.GetString("tls.cert"),
-			viper.GetString("tls.privKey"),
+			viper.GetString("tls_ferry.cert"),
+			viper.GetString("tls_ferry.privKey"),
 			gLogger)
 		err := srv.ServeImportExport()
 		if err != nil {

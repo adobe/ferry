@@ -90,55 +90,59 @@ func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err
 			zap.String("dest", exp.collectDir))
 
 		for _, finalFile := range resp.FinalizedFiles {
-			exp.logger.Info("Downloading", zap.String("file", finalFile))
-			st := time.Now()
-			fileSize := int64(0)
-			gc, err := eg.conn.GetExportedFile(context.Background(),
-				&ferry.FileRequest{
-					SessionId: sessionID,
-					TargetUrl: exp.targetURL,
-					FileName:  finalFile,
-				}) // Max 1 MB chunk. GRPC hard limit is 4 MB
-			if err != nil {
-				return errors.Wrapf(err, "Error from EndSession")
-			}
-			localPath := path.Join(exp.collectDir, finalFile)
-			fp, err := os.OpenFile(localPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-			if err != nil {
-				return errors.Wrapf(err, "Create of local file failed: %s", localPath)
-			}
-			for {
-				block, err := gc.Recv()
-				if err == io.EOF {
-					break
-				}
+			if finalFile.ShellOnly {
+				exp.logger.Info("Skipping meta-data-only file (CAN'T DOWNLOAD!)", zap.String("file", finalFile.FileName))
+			} else {
+				exp.logger.Info("Downloading", zap.String("file", finalFile.FileName))
+				st := time.Now()
+				fileSize := int64(0)
+				gc, err := eg.conn.GetExportedFile(context.Background(),
+					&ferry.FileRequest{
+						SessionId: sessionID,
+						TargetUrl: exp.targetURL,
+						FileName:  finalFile.FileName,
+					}) // Max 1 MB chunk. GRPC hard limit is 4 MB
 				if err != nil {
-					return errors.Wrapf(err, "Recv on block of file %s failed", finalFile)
+					return errors.Wrapf(err, "Error from EndSession")
 				}
-				fileSize += int64(len(block.BlockData))
-				n, err := fp.Write(block.BlockData)
-				if err != nil || n != len(block.BlockData) {
+				localPath := path.Join(exp.collectDir, finalFile.FileName)
+				fp, err := os.OpenFile(localPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+				if err != nil {
+					return errors.Wrapf(err, "Create of local file failed: %s", localPath)
+				}
+				for {
+					block, err := gc.Recv()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						return errors.Wrapf(err, "Recv on block of file %s failed", finalFile)
+					}
+					fileSize += int64(len(block.BlockData))
+					n, err := fp.Write(block.BlockData)
+					if err != nil || n != len(block.BlockData) {
+						return errors.Wrapf(err, "Write on block of file %s failed", localPath)
+					}
+				}
+				err = fp.Close()
+				if err != nil {
 					return errors.Wrapf(err, "Write on block of file %s failed", localPath)
 				}
-			}
-			err = fp.Close()
-			if err != nil {
-				return errors.Wrapf(err, "Write on block of file %s failed", localPath)
-			}
-			exp.logger.Info("Downloaded",
-				zap.String("file", finalFile),
-				zap.Int64("file-size", fileSize),
-				zap.String("local-path", localPath),
-				zap.Duration("duration", time.Since(st)),
-			)
-			_, err = eg.conn.RemoveExportedFile(context.Background(),
-				&ferry.FileRequest{
-					SessionId: sessionID,
-					TargetUrl: exp.targetURL,
-					FileName:  finalFile,
-				})
-			if err != nil {
-				return errors.Wrapf(err, "Delete of source file %s failed", finalFile)
+				exp.logger.Info("Downloaded",
+					zap.String("file", finalFile.FileName),
+					zap.Int64("file-size", fileSize),
+					zap.String("local-path", localPath),
+					zap.Duration("duration", time.Since(st)),
+				)
+				_, err = eg.conn.RemoveExportedFile(context.Background(),
+					&ferry.FileRequest{
+						SessionId: sessionID,
+						TargetUrl: exp.targetURL,
+						FileName:  finalFile.FileName,
+					})
+				if err != nil {
+					return errors.Wrapf(err, "Delete of source file %s failed", finalFile)
+				}
 			}
 		}
 	}

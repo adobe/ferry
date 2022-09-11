@@ -138,10 +138,20 @@ func (exp *Server) StopExportSession(ctx context.Context, fs *ferry.Session) (*f
 	finalPaths := es.Finalize()
 	exp.logger.Info("Released resources", zap.String("sessionID", fs.SessionId))
 
+	var ferryFinalizedFiles []*ferry.FinalizedFile
+	for _, v := range finalPaths {
+		x := &ferry.FinalizedFile{}
+		x.Checksum = v.Checksum
+		x.ChunksCount = v.ChunksWritten
+		x.ContentSize = v.BytesWritten
+		x.FileName = v.FileName
+		ferryFinalizedFiles = append(ferryFinalizedFiles, x)
+	}
+
 	return &ferry.SessionResponse{
 		SessionId:      fs.SessionId,
 		Status:         ferry.SessionResponse_SUCCESS,
-		FinalizedFiles: finalPaths,
+		FinalizedFiles: ferryFinalizedFiles,
 	}, nil
 }
 
@@ -163,10 +173,20 @@ func (exp *Server) EndExportSession(ctx context.Context, fs *ferry.Session) (*fe
 	finalPaths := es.Finalize()
 	exp.logger.Info("Released resources", zap.String("sessionID", fs.SessionId))
 
+	var ferryFinalizedFiles []*ferry.FinalizedFile
+	for _, v := range finalPaths {
+		x := &ferry.FinalizedFile{}
+		x.Checksum = v.Checksum
+		x.ChunksCount = v.ChunksWritten
+		x.ContentSize = v.BytesWritten
+		x.FileName = v.FileName
+		ferryFinalizedFiles = append(ferryFinalizedFiles, x)
+	}
+
 	return &ferry.SessionResponse{
 		SessionId:      fs.SessionId,
 		Status:         ferry.SessionResponse_SUCCESS,
-		FinalizedFiles: finalPaths,
+		FinalizedFiles: ferryFinalizedFiles,
 	}, nil
 }
 

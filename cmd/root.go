@@ -200,6 +200,21 @@ func initConfig() {
 			os.Exit(1)
 		}
 	}
+	// FLAGS SPECIFIC TO STATLOCAL
+	for _, v := range []string{"checksum", "threads"} {
+		if pf := statLocalCmd.Flags().Lookup(v); pf != nil {
+			err := viper.BindPFlag(v, pf)
+			if err != nil {
+				// CAN'T USE ZAP - Logger not initilized yet
+				fmt.Printf("Error from BindPFlag (statLocalCmd): %+v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Println("Unknown flag ", v)
+			os.Exit(1)
+		}
+	}
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {
