@@ -33,7 +33,8 @@ type ExporterSession struct {
 	wgReaders      *sync.WaitGroup
 	wgStaters      *sync.WaitGroup
 	logger         *zap.Logger
-	samplingMode   bool
+	readPercent    int
+	exportFormat   string
 	results        Results
 	// state          SessionState
 }
@@ -53,7 +54,7 @@ type readerStat struct {
 	//fileName   string
 }
 
-func NewSession(db fdb.Database, targetURL string, readerThreads int, compress bool, logger *zap.Logger, samplingMode bool) (es *ExporterSession, err error) {
+func NewSession(db fdb.Database, targetURL string, readerThreads int, compress bool, logger *zap.Logger, readPercent int, exportFormat string) (es *ExporterSession, err error) {
 
 	sessionID, err := uuid.NewRandom()
 	if err != nil {
@@ -72,7 +73,8 @@ func NewSession(db fdb.Database, targetURL string, readerThreads int, compress b
 		readerStatChan: make(chan readerStat),
 		wgReaders:      &sync.WaitGroup{},
 		wgStaters:      &sync.WaitGroup{},
-		samplingMode:   samplingMode,
+		readPercent:    readPercent,
+		exportFormat:   exportFormat,
 	}
 
 	es.results.finalizedDetails = make(map[string]common.ArchiveFileDetails)
@@ -113,7 +115,7 @@ func (es *ExporterSession) Send(krange fdb.KeyRange) {
 	es.readerKeysChan <- krange
 }
 
-func (es *ExporterSession) Finalize() (finalFiles []common.ArchiveFileDetails) {
+func (es *ExporterSession) Finalize() (finalizedDetails map[string]common.ArchiveFileDetails) {
 
 	// ---------------------------------------------------
 	// WARNING: Order of channel close and .Wait()s are
@@ -137,10 +139,6 @@ func (es *ExporterSession) Finalize() (finalFiles []common.ArchiveFileDetails) {
 		es.readerStatChan = nil
 	}
 
-	for _, v := range es.results.finalizedDetails {
-		finalFiles = append(finalFiles, v)
-	}
-
-	es.logger.Warn("Finalize()", zap.Any("files", finalFiles))
-	return finalFiles
+	es.logger.Warn("Finalize()", zap.Any("files", es.results.finalizedDetails))
+	return es.results.finalizedDetails
 }

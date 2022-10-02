@@ -31,6 +31,7 @@ var cfgFile string
 var storeURL string
 var gLogger *zap.Logger
 var verbose bool
+var quiet bool
 
 var profilingRequested string // see github.com/pkg/profile
 var profilesAvailable = map[string]func(*profile.Profile){
@@ -83,6 +84,7 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Quiet (logs only WARN or above)")
 	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to (applies to `serve` and `export` commands")
 
 }
@@ -164,11 +166,17 @@ func initConfig() {
 
 	viper.AutomaticEnv() // read in environment variables that match
 
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		// CAN'T USE ZAP - Logger not initilized yet
-		fmt.Printf("Using config file: %+v\n", viper.ConfigFileUsed())
+	err := viper.ReadInConfig()
+	if err != nil {
+		fmt.Printf("WARNING: No config file found. Please create a `.ferry.yaml`\n")
 	}
+	/*
+		// If a config file is found, read it in.
+		if err := viper.ReadInConfig(); err == nil {
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Printf("Using config file: %+v\n", viper.ConfigFileUsed())
+		}
+	*/
 
 	for _, v := range []string{"port"} { // PERSISTENT FLAGS SET AT ROOT
 		if pf := rootCmd.PersistentFlags().Lookup(v); pf != nil {
@@ -186,7 +194,7 @@ func initConfig() {
 	}
 
 	// FLAGS SPECIFIC TO EXPORT
-	for _, v := range []string{"dryrun", "sample", "compress", "threads", "collect"} {
+	for _, v := range []string{"dryrun", "read-percent", "export-format", "compress", "threads", "collect"} {
 		if pf := exportCmd.Flags().Lookup(v); pf != nil {
 			err := viper.BindPFlag(v, pf)
 			if err != nil {
@@ -200,21 +208,23 @@ func initConfig() {
 			os.Exit(1)
 		}
 	}
-	// FLAGS SPECIFIC TO STATLOCAL
-	for _, v := range []string{"checksum", "threads"} {
-		if pf := statLocalCmd.Flags().Lookup(v); pf != nil {
-			err := viper.BindPFlag(v, pf)
-			if err != nil {
+	/*
+		// FLAGS SPECIFIC TO STATS COMMAND
+		for _, v := range []string{"threads"} {
+			if pf := statsCmd.Flags().Lookup(v); pf != nil {
+				err := viper.BindPFlag(v, pf)
+				if err != nil {
+					// CAN'T USE ZAP - Logger not initilized yet
+					fmt.Printf("Error from BindPFlag (scanCmd): %+v\n", err)
+					os.Exit(1)
+				}
+			} else {
 				// CAN'T USE ZAP - Logger not initilized yet
-				fmt.Printf("Error from BindPFlag (statLocalCmd): %+v\n", err)
+				fmt.Println("ERROR: Unknown flag ", v)
 				os.Exit(1)
 			}
-		} else {
-			// CAN'T USE ZAP - Logger not initilized yet
-			fmt.Println("Unknown flag ", v)
-			os.Exit(1)
 		}
-	}
+	*/
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {
@@ -222,27 +232,33 @@ func initConfig() {
 			ProfileStarted = profile.Start(p, profile.ProfilePath("."))
 		} else {
 			// CAN'T USE ZAP - Logger not initilized yet
-			fmt.Printf("Unknown profiling mode: %s\n", profilingRequested)
+			fmt.Printf("ERROR: Unknown profiling mode: %s\n", profilingRequested)
 			os.Exit(1)
 		}
 	}
 
 	zapLevel := zapcore.InfoLevel
+	if verbose && quiet {
+		fmt.Printf("ERROR: Both verbose and quiet flags are turned on!")
+		os.Exit(-1)
+	}
 	if verbose {
-		fmt.Println("Verbose logging")
 		zapLevel = zapcore.DebugLevel
+	}
+	if quiet {
+		zapLevel = zapcore.WarnLevel
 	}
 	zapConfig := zap.Config{
 		Level:             zap.NewAtomicLevelAt(zapLevel),
 		DisableCaller:     true,
 		DisableStacktrace: true,
 		Development:       verbose,
-		Encoding:          "console",
+		Encoding:          "json",
 		EncoderConfig:     zap.NewDevelopmentEncoderConfig(),
 		OutputPaths:       []string{"stderr"},
 		ErrorOutputPaths:  []string{"stderr"},
 	}
-	var err error
+
 	gLogger, err = zapConfig.Build()
 	if err != nil {
 		// CAN'T USE ZAP - Logger not initilized yet

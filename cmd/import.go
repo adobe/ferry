@@ -51,7 +51,7 @@ Import all data or a subset of keys to a target FoundationDB instance
 }
 
 func init() {
-	rootCmd.AddCommand(importCmd)
+	//rootCmd.AddCommand(importCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as

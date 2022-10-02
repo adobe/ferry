@@ -9,52 +9,41 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-
 package cmd
 
 import (
+	"log"
+
 	"github.com/adobe/ferry/fdbstat"
-	"github.com/adobe/ferry/finder"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
-// statLocalCmd represents the export command
-var statLocalCmd = &cobra.Command{
-	Use:   "statlocal",
-	Short: "Print stats about the current DB",
-	Run: func(cmd *cobra.Command, args []string) {
-		finder, err := finder.NewFinder(gFDB, finder.Logger(gLogger))
-		if err != nil {
-			gLogger.Fatal("Error initializing finder", zap.Error(err))
-		}
+// statusCmd represents the manage command
+var treeCmd = &cobra.Command{
+	Use:   "tree",
+	Short: "Print tree of directories",
+	Long:  `Print tree of directories (like unix tree command)`,
 
-		bKeys, err := finder.GetBoundaryKeys()
-		if err != nil {
-			gLogger.Fatal("Error fetching boundary keys", zap.Error(err))
-		}
-		pmap, err := finder.GetLocations(bKeys)
-		if err != nil {
-			gLogger.Fatal("Error fetching locations", zap.Error(err))
-		}
+	Run: func(cmd *cobra.Command, args []string) {
 
 		srvy, err := fdbstat.NewSurveyor(gFDB, fdbstat.Logger(gLogger))
 		if err != nil {
 			gLogger.Fatal("Error initializing finder", zap.Error(err))
 		}
 
-		gLogger.Info("threads", zap.Int("threads", viper.GetInt("threads")))
-		dbSize, err := srvy.CalculateRowCount(pmap, viper.GetInt("threads"))
+		dirs, err := srvy.GetAllDirectories()
 		if err != nil {
-			gLogger.Fatal("Error fetching estimated size", zap.Error(err))
+			log.Fatalf("GetAllDirectories errored: %+v", err)
 		}
-		gLogger.Info("Total DB size", zap.Int64("size", dbSize))
+		for _, dir := range dirs {
+			gLogger.Info("Directory", zap.String("path", dir))
+		}
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(statLocalCmd)
+	rootCmd.AddCommand(treeCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
@@ -62,8 +51,4 @@ func init() {
 	// set them here, it will always override what is in .ferry.yaml (making the
 	// config file useless)
 	// ------------------------------------------------------------------------
-	statLocalCmd.Flags().BoolP("sample", "m", false, "Sample - fetch only 1000 keys per range")
-	statLocalCmd.Flags().IntP("threads", "t", 0, "How many threads to read in parallel")
-	statLocalCmd.Flags().IntP("checksum", "c", 0, "Checksum all data")
-	statLocalCmd.Flags().IntP("summary", "s", 0, "Report only final db level summary")
 }

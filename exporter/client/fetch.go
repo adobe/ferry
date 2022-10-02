@@ -34,7 +34,8 @@ func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err
 		zap.String("host", eg.host))
 	resp, err := eg.conn.StartExportSession(context.Background(), &ferry.Target{
 		TargetUrl:     exp.targetURL,
-		SamplingMode:  exp.samplingMode,
+		ReadPercent:   int32(exp.readPercent),
+		ExportFormat:  exp.exportFormat,
 		ReaderThreads: int32(exp.readerThreads),
 		Compress:      exp.compress,
 	})
@@ -81,6 +82,10 @@ func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err
 		return errors.Wrapf(err, "Error from StopSession")
 	}
 	exp.logger.Info("Export saved", zap.Int("files", len(resp.FinalizedFiles)))
+	err = saveArchiveSummary(eg.host, resp.FinalizedFiles)
+	if err != nil {
+		return errors.Wrapf(err, "Error from saveArchiveSummary")
+	}
 
 	if exp.collectDir != "" && // --collect /foo/bar argument exists
 		(!strings.Contains(exp.targetURL, "://") || // and it is a raw-path (not a s3:// type URL)
@@ -153,6 +158,20 @@ func (exp *ExporterClient) ScheduleFetchByNode(eg exportGroup, dryRun bool) (err
 		return errors.Wrapf(err, "Error from EndSession")
 	}
 
+	return nil
+}
+func saveArchiveSummary(host string, finalizedFiles []*ferry.FinalizedFile) (err error) {
+	fileName := fmt.Sprintf("%s.out", host)
+	fp, err := os.Create(fileName)
+	if err != nil {
+		return errors.Wrapf(err, "unable to save results files to >%s<", fileName)
+	}
+	for _, ff := range finalizedFiles {
+		fmt.Fprintf(fp, "%s\t%s\t%d\t%d\t%s\t%t\n",
+			ff.FileName, ff.KeyRange, ff.ContentSize,
+			ff.RowCount, ff.Checksum, ff.ShellOnly)
+	}
+	fp.Close()
 	return nil
 }
 

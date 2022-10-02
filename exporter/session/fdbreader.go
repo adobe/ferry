@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ const MAX_VALUE_LEN = (1 << 18) - 1 // Max 18 bits for its length. We only need 
 func (es *ExporterSession) saveRecord(ar archive.Archive, key, value []byte) (bytesTotal int, err error) {
 	const UINT32LEN = 4
 	var lbuf = make([]byte, UINT32LEN)
+	var n int
 
 	keyLen := len(key)
 	valueLen := len(value)
@@ -45,7 +47,7 @@ func (es *ExporterSession) saveRecord(ar archive.Archive, key, value []byte) (by
 
 	binary.LittleEndian.PutUint32(lbuf, recordLen)
 
-	n, err := ar.Write(lbuf)
+	n, err = ar.Write(lbuf)
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, UINT32LEN)
 		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", UINT32LEN))
@@ -65,6 +67,29 @@ func (es *ExporterSession) saveRecord(ar archive.Archive, key, value []byte) (by
 	if err != nil {
 		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, valueLen)
 		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", valueLen))
+		return 0, errors.Wrap(err, msg)
+	}
+	bytesTotal += n
+
+	return bytesTotal, err
+}
+
+func (es *ExporterSession) saveKeysPlainText(ar archive.Archive, key []byte) (bytesTotal int, err error) {
+	var n int
+
+	keyLen := len(key)
+	n, err = ar.Write(key)
+	if err != nil {
+		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, %d expected.", n, keyLen)
+		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", keyLen))
+		return 0, errors.Wrap(err, msg)
+	}
+	bytesTotal += n
+
+	n, err = ar.Write([]byte("\n"))
+	if err != nil {
+		msg := fmt.Sprintf("FATAL: Wrote only %d bytes, 2 expected.", n)
+		es.logger.Error(msg, zap.Int("wrote", n), zap.Int("expected", 2))
 		return 0, errors.Wrap(err, msg)
 	}
 	bytesTotal += n
@@ -93,161 +118,208 @@ func (es *ExporterSession) printStats(wg *sync.WaitGroup) {
 			totalKeysLastPrinted = totalKeysRead
 		}
 	}
+
+	es.results.Lock()
 	es.logger.Info("Session total", zap.Int64("keys", totalKeysRead), zap.Int64("bytes", totalBytesRead))
 	for k, v := range es.results.finalizedDetails {
 		es.logger.Info("SUMMARY",
 			zap.Any("range", k),
 			zap.Int("content-length", int(v.ChunksWritten)))
 	}
+	es.results.Unlock()
+
 }
 
 func (es *ExporterSession) dbReader(thread int) (err error) {
 
-	totalKeysRead := 0
-
 	es.logger.Info("Exporting to", zap.String("targetURL", es.targetURL))
 
 	for keyRange := range es.readerKeysChan {
-		ar, err := archive.NewArchive(es.targetURL, "fdb", ".records",
-			common.Compress(es.compress),
-			common.BufferSize(0),
-			common.Logger(es.logger))
+		err := es.rangeReader(thread, keyRange)
 		if err != nil {
-			return errors.Wrapf(err, "Unable to create archive file")
+			return errors.Wrap(err, "error from rangeReader")
 		}
-		defer ar.Close()
+	}
+	return err
+}
 
-		txn, err := es.db.CreateTransaction()
-		if err != nil {
-			return errors.Wrapf(err, "Unable to create fdb transaction")
-		}
-		err = txn.Options().SetReadYourWritesDisable()
-		if err != nil {
-			return errors.Wrapf(err, "Unable to set transaction option")
-		}
+func (es *ExporterSession) rangeReader(thread int, keyRange fdb.KeyRange) (err error) {
 
-		rangeIdentifier := fmt.Sprintf("%s-%s", keyRange.Begin.FDBKey(), keyRange.End.FDBKey())
-		keysRead := 0
-		keysReadInOneTxn := 0
-		keysReadInOneBatch := 0
-		bytesSaved := int64(0)
-		lastReadKey, endKey := keyRange.FDBRangeKeys()
-		batchReadLimit := 10000
-		if es.samplingMode {
-			batchReadLimit = 100
-		}
-	Fetch:
-		for {
-			fKey := txn.GetRange(keyRange, fdb.RangeOptions{Limit: batchReadLimit, Mode: fdb.StreamingModeSerial})
-			it := fKey.Iterator()
-			for it.Advance() {
-				// ---------------------------------------------------------
-				// uncomment line below for testing only
-				// time.Sleep(time.Millisecond * 1)
-				// This is to artifically create the 5 second txn limit test
-				// ---------------------------------------------------------
-				kv, err := it.Get()
-				if err != nil {
-					txn.Commit()
-					if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
+	ar, err := archive.NewArchive(es.targetURL, "fdb", ".records",
+		common.Compress(es.compress),
+		common.BufferSize(4096),
+		common.Logger(es.logger))
+	if err != nil {
+		return errors.Wrapf(err, "Unable to create archive file")
+	}
+	defer ar.Close()
 
-						es.logger.Info("Txn limit hit, restarting txn",
-							zap.Int("after", keysReadInOneTxn))
-						// don't print key. Don't assume key is utf8 string
-						// zap.String("key", lastReadKey.FDBKey().String()))
+	txn, err := es.db.CreateTransaction()
+	if err != nil {
+		return errors.Wrapf(err, "Unable to create fdb transaction")
+	}
 
-						txn, err = es.db.CreateTransaction()
-						if err != nil {
-							return errors.Wrapf(err, "Unable to create fdb transaction")
-						}
-						err = txn.Options().SetReadYourWritesDisable()
-						if err != nil {
-							return errors.Wrapf(err, "Unable to set transaction option")
-						}
-						keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
-						keysReadInOneTxn = 0
-						continue Fetch
-						// continue from where we last received
+	err = txn.Options().SetReadYourWritesDisable()
+	if err != nil {
+		return errors.Wrapf(err, "Unable to set transaction option")
+	}
+
+	rangeIdentifier := fmt.Sprintf("%s-%s",
+		fdb.Printable(keyRange.Begin.FDBKey()),
+		fdb.Printable(keyRange.End.FDBKey()))
+	keysRead := int64(0)
+	keysReadInThisTxn := 0
+	bytesSaved := int64(0)
+	lastReadKey, endKey := keyRange.FDBRangeKeys()
+	batchReadLimit := 100000
+
+Fetch:
+	for {
+		es.logger.Debug("Querying",
+			zap.Int("thread", thread),
+			zap.Int("after", keysReadInThisTxn),
+			zap.String("begin-key", fdb.Printable(keyRange.Begin.FDBKey())),
+			zap.String("end-key", fdb.Printable(keyRange.End.FDBKey())))
+		fKey := txn.GetRange(keyRange, fdb.RangeOptions{Limit: batchReadLimit, Mode: fdb.StreamingModeSerial})
+		it := fKey.Iterator()
+		for it.Advance() {
+			// ---------------------------------------------------------
+			// uncomment line below for testing only
+			// time.Sleep(time.Millisecond * 1)
+			// This is to artifically create the 5 second txn limit test
+			// ---------------------------------------------------------
+			kv, err := it.Get()
+			if err != nil {
+				txn.Commit()
+				if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
+
+					// Reduce batchLimit to something smaller
+					batchReadLimit = keysReadInThisTxn - keysReadInThisTxn%100
+					if batchReadLimit < 100 {
+						batchReadLimit = 100
 					}
-					return errors.Wrapf(err, "Unable to create fdb transaction")
-				}
-				if keysReadInOneTxn == 0 && keysRead != 0 && bytes.Equal(lastReadKey.FDBKey(), kv.Key) {
-					// When retrying transactions, we don't have a way to ask for
-					// starting from the 'next' key because we don't know what the next key is.
-					// We will need to give the same key as the beginKey for next try,
-					// and skip that first row when we get it back. beginKey is inclusive.
-					continue
-				}
 
-				keysRead++
-				keysReadInOneTxn++
-				keysReadInOneBatch++
-				if len(kv.Key) > 1000 {
-					es.logger.Warn("Invalid-key", zap.Int("keyLen", len(kv.Key)))
-				}
-				if ar != nil {
-					n, err := es.saveRecord(ar, kv.Key, kv.Value)
+					// Round it down to a multiple of 100
+					es.logger.Info("Txn limit hit",
+						zap.Int("thread", thread),
+						zap.Int("after", keysReadInThisTxn),
+						zap.String("key", fdb.Printable(lastReadKey.FDBKey())),
+						zap.Int("new batch limit", batchReadLimit))
+
+					txn, err = es.db.CreateTransaction()
 					if err != nil {
-						es.logger.Error("saveRecord failed",
-							zap.Int("after", keysReadInOneBatch),
-							zap.Int("total", keysRead),
-							zap.Error(err))
-						return errors.Wrapf(err, "Unable to save data locally")
+						return errors.Wrapf(err, "Unable to create fdb transaction")
 					}
-					bytesSaved += int64(n)
-				} else {
-					bytesSaved += int64(len(kv.Key) + len(kv.Value))
+					keysReadInThisTxn = 0
+					err = txn.Options().SetReadYourWritesDisable()
+					if err != nil {
+						return errors.Wrapf(err, "Unable to set transaction option")
+					}
+					keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
+					continue Fetch
+					// continue from where we last received
 				}
-				lastReadKey = kv.Key
-				totalKeysRead++
+				return errors.Wrapf(err, "Unable to read key range from fdb")
 			}
+			if keysReadInThisTxn == 0 && keysRead != 0 && bytes.Equal(lastReadKey.FDBKey(), kv.Key) {
+				// When retrying transactions, we don't have a way to ask for
+				// starting from the 'next' key because we don't know what the next key is.
+				// We will need to give the same key as the beginKey for next try,
+				// and skip that first row when we get it back. beginKey is inclusive.
+				es.logger.Debug("Skipping repeat read of",
+					zap.Int("thread", thread),
+					zap.String("key", fdb.Printable(kv.Key.FDBKey())))
 
-			if keysReadInOneBatch >= batchReadLimit && !es.samplingMode {
-				// there might be more left.
-				// in es.samplingMode though, we stop after one "smaller" batch.
-				// See override of batchReadLimit above
-				es.logger.Debug("Batch limit hit, starting another batch",
-					zap.Int("after", keysReadInOneBatch),
-					zap.Int("total", keysRead))
-
-				txn, err = es.db.CreateTransaction()
-				if err != nil {
-					return errors.Wrapf(err, "Unable to create fdb transaction")
-				}
-				err = txn.Options().SetReadYourWritesDisable()
-				if err != nil {
-					return errors.Wrapf(err, "Unable to set transaction option")
-				}
-
-				keysReadInOneBatch = 0
-				keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
 				continue
 			}
 
-			break // we are really done
+			keysRead++
+			keysReadInThisTxn++
+			if len(kv.Key) > 2048 {
+				es.logger.Warn("Invalid-key", zap.Int("keyLen", len(kv.Key)))
+			}
+			var n int
+			if es.readPercent == 100 || rand.Intn(100) <= es.readPercent {
+				if es.exportFormat == "archive" {
+					n, err = es.saveRecord(ar, kv.Key, kv.Value)
+				} else {
+					n, err = es.saveKeysPlainText(ar, kv.Key)
+				}
+				if err != nil {
+					es.logger.Error("saveRecord failed",
+						zap.Int("thread", thread),
+						zap.Int("after", keysReadInThisTxn),
+						zap.Int64("total", keysRead),
+						zap.Error(err))
+					return errors.Wrapf(err, "Unable to save data locally")
+				}
+				bytesSaved += int64(n)
+			} else {
+				bytesSaved += int64(len(kv.Key) + len(kv.Value))
+			}
+			lastReadKey = kv.Key
 		}
-		// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
-		txn.Commit()
-		//fileName := ar.Name()
-		es.readerStatChan <- readerStat{
-			keysRead:   int64(keysRead),
-			bytesSaved: int64(bytesSaved),
-			//fileName:   fileName,
-		}
-		keysRead, bytesSaved = 0, 0 // reset to avoid double counting
 
-		err = ar.Close()
-		if err != nil {
-			return errors.Wrapf(err, "Unable to close archive file")
-		}
-		finalizedDetails := ar.FinalizedFiles()
+		if keysReadInThisTxn >= (batchReadLimit - 1) {
+			// Reason to compare against `batchReadLimit-1`
+			// We want to keep `keysReadInThisTxn` to be actual useful keys read
+			// When we ask for 1000 keys and skip first one, we only get 999
+			// there might be more left.
+			// in es.samplingMode though, we stop after one "smaller" batch.
+			// See override of batchReadLimit above
+			es.logger.Debug("Batch limit hit, starting another batch",
+				zap.Int("thread", thread),
+				zap.Int("after", keysReadInThisTxn),
+				zap.Int64("total", keysRead),
+				zap.String("key", fdb.Printable(lastReadKey.FDBKey())))
 
-		es.results.Lock()
-		for _, v := range finalizedDetails {
-			es.results.finalizedDetails[rangeIdentifier] = v
-			es.results.finalizedFiles[v.FileName] = true
+			txn, err = es.db.CreateTransaction()
+			if err != nil {
+				return errors.Wrapf(err, "Unable to create fdb transaction")
+			}
+			err = txn.Options().SetReadYourWritesDisable()
+			if err != nil {
+				return errors.Wrapf(err, "Unable to set transaction option")
+			}
+
+			keysReadInThisTxn = 0
+			keyRange = fdb.KeyRange{Begin: lastReadKey, End: endKey}
+			continue
 		}
-		es.results.Unlock()
+
+		es.logger.Debug("Done  with key range",
+			zap.Int("thread", thread),
+			zap.Int("last-txn-read", keysReadInThisTxn),
+			zap.String("range", rangeIdentifier),
+			zap.Int64("keys", keysRead))
+
+		break // we are really done
 	}
-	return err
+	// log.Printf("NEXT: Read %d keys %d bytes", keysRead, bytesRead)
+	txn.Commit()
+	// fileName := ar.Name()
+	es.readerStatChan <- readerStat{
+		keysRead:   int64(keysRead),
+		bytesSaved: int64(bytesSaved),
+		//fileName:   fileName,
+	}
+
+	err = ar.Close()
+	if err != nil {
+		return errors.Wrapf(err, "Unable to close archive file")
+	}
+	finalizedDetails := ar.FinalizedFiles()
+
+	es.results.Lock()
+	for _, v := range finalizedDetails {
+		v.RowsWritten = keysRead
+		es.results.finalizedDetails[rangeIdentifier] = v
+		es.results.finalizedFiles[v.FileName] = true
+
+	}
+	// es.logger.Debug("Results so far",
+	//
+	//	zap.Any("results", es.results.finalizedDetails))
+	es.results.Unlock()
+	return nil
 }

@@ -30,7 +30,6 @@ func (exp *ImporterClient) ScheduleImportByNode(eg importGroup, dryRun bool) (er
 		zap.String("host", eg.host))
 	resp, err := eg.conn.StartImportSession(context.Background(), &ferry.Target{
 		TargetUrl:     exp.targetURL,
-		SamplingMode:  exp.samplingMode,
 		ReaderThreads: int32(exp.writerThreads),
 	})
 	if err != nil {

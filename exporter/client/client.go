@@ -33,10 +33,11 @@ type ExporterClient struct {
 
 	// Optional, set via ExporterOptions
 	dryRun        bool
-	samplingMode  bool
+	readPercent   int
 	compress      bool
 	readerThreads int
 	collectDir    string
+	exportFormat  string
 }
 
 // exportGroup is a dynamic data derived from []storageGroup
@@ -105,8 +106,14 @@ func Collect(collectDir string) ExporterOption {
 	}
 }
 
-func Sample(sample bool) ExporterOption {
+func Sample(sample int) ExporterOption {
 	return func(exp *ExporterClient) {
-		exp.samplingMode = sample
+		exp.readPercent = sample
+	}
+}
+
+func ExportFormat(format string) ExporterOption {
+	return func(exp *ExporterClient) {
+		exp.exportFormat = format
 	}
 }

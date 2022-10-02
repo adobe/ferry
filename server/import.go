@@ -28,7 +28,7 @@ func (exp *Server) StartImportSession(ctx context.Context, tgt *ferry.Target) (*
 		tgt.TargetUrl,
 		int(tgt.ReaderThreads),
 		exp.logger,
-		tgt.SamplingMode)
+		false)
 	if err != nil {
 		exp.logger.Warn("Failed to create a session ID", zap.Error(err))
 		return nil, errors.Wrap(err, "Failed to create a session ID")

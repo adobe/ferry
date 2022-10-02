@@ -16,8 +16,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"math"
+	"os"
 
 	"github.com/adobe/ferry/finder"
 	ferry "github.com/adobe/ferry/rpc"
@@ -34,7 +34,7 @@ func (exp *ExporterClient) AssignSources(pmap *finder.PartitionMap) (exportPlan 
 
 	busy := map[string]int{}
 
-	b, err := ioutil.ReadFile(exp.caFile)
+	b, err := os.ReadFile(exp.caFile)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Unable to read CA file: >%s<", exp.caFile)
 	}
@@ -43,8 +43,9 @@ func (exp *ExporterClient) AssignSources(pmap *finder.PartitionMap) (exportPlan 
 		return nil, errors.New("credentials: failed to append certificates")
 	}
 	config := &tls.Config{
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, // TODO: Fix the TLS issue
 		RootCAs:            cp,
+		ServerName:         "adobe.net",
 	}
 	/*
 		creds, err := credentials.NewClientTLSFromFile(exp.caFile, "adobe.net")

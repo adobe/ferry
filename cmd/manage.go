@@ -62,7 +62,7 @@ func delete() {
 }
 
 func init() {
-	rootCmd.AddCommand(manageCmd)
+	//rootCmd.AddCommand(manageCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
