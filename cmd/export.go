@@ -23,7 +23,7 @@ import (
 // exportCmd represents the export command
 var exportCmd = &cobra.Command{
 	Use:   "export",
-	Short: "Export all (or filtered set of) keys and values from FoundationDB",
+	Short: "Export all keys and values from FoundationDB",
 	Long: `This utility will export all (or filtered) data from FoundationDB 
 to one of the possible stores - a local file-system folder, Azure blobstore or Amazon S3
 Export is not done in a single transaction and that implies you should only do this

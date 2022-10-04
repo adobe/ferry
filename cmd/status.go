@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var print_hosts bool
+
 // statusCmd represents the manage command
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -30,12 +32,17 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			gLogger.Fatal("Status failed", zap.Error(err))
 		}
-		fmt.Println(status)
-		hosts, err := fdbstat.GetNodesFromStatus(status)
-		if err != nil {
-			gLogger.Fatal("Status failed", zap.Error(err))
+		if !print_hosts {
+			fmt.Println(status)
+		} else {
+			hosts, err := fdbstat.GetNodesFromStatus(status)
+			if err != nil {
+				gLogger.Fatal("Status failed", zap.Error(err))
+			}
+			for _, host := range hosts {
+				fmt.Println(host)
+			}
 		}
-		fmt.Println(hosts)
 	},
 }
 
@@ -48,4 +55,6 @@ func init() {
 	// set them here, it will always override what is in .ferry.yaml (making the
 	// config file useless)
 	// ------------------------------------------------------------------------
+
+	statusCmd.Flags().BoolVarP(&print_hosts, "hosts", "", false, "Print only hosts")
 }

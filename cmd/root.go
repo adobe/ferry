@@ -43,11 +43,8 @@ var ProfileStarted interface{ Stop() }
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "ferry",
-	Short: "Set of utilities to export data from or import data into FoundationDB",
-	Long: `This utility will export all (or filtered) data from FoundationDB 
-to one of the possible stores - a local file-system folder, Azure blobstore or Amazon S3
-Export is not done in a single transaction and that implies you should only do this
-if your data is static or you don't care for it being a point-in-time snapshot`,
+	Short: "Set of utilities to manage data stored in FoundationDB",
+	Long:  `Set of utilities to manage data stored in FoundationDB`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {

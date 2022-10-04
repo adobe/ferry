@@ -11,12 +11,26 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Surveyor) dir(path []string) (children []string, err error) {
-	var dirs, subDirs []string
+type DirNode struct {
+	FlattenedPath   string // Also used as 'key' to index into DirListing below
+	Path            []string
+	Prefix          fdb.Key // raw key in original form
+	PrefixPrintable string
+	Children        []string // Immediate children only, slice of Flattened Path
+}
+
+type DirListing map[string]DirNode
+
+func (s *Surveyor) dir(path []string) (desc []DirNode, err error) {
+	var dirs []string
+	var subDirs []DirNode
 
 	var subSpace subspace.Subspace
+	var node DirNode
 
 	if path != nil { // root directory cannot be "opened"
+		node.Path = path
+		node.FlattenedPath = strings.Join(path, "/")
 		subSpace, err = directory.Open(s.db, path, nil)
 		if err != nil {
 			return nil, errors.Wrapf(err, "directory.List failed for %s", path)
@@ -24,48 +38,42 @@ func (s *Surveyor) dir(path []string) (children []string, err error) {
 	} else {
 		subSpace = subspace.AllKeys()
 	}
-	krB, krE := subSpace.FDBRangeKeys()
+	node.Prefix = subSpace.FDBKey()
+	node.PrefixPrintable = fdb.Printable(subSpace.Bytes())
+
 	s.logger.Debug("directory.List()",
 		zap.Strings("path", path),
-		zap.String("prefix", fdb.Printable(subSpace.Bytes())),
-		// TODO: there must be a better way to write the statement below.
-		// subSpace already contains the 'Range'. We get it as tuple via FDBRangeKeys
-		// above ^^ and then convert to a KeyRange again. Seems convoluted.
-		zap.Any("range", NewHashableKeyRange(fdb.KeyRange{Begin: krB, End: krE})))
+		zap.Any("prefix-pritable", node.PrefixPrintable),
+		zap.Any("prefix", node.Prefix))
 
 	dirs, err = directory.List(s.db, path)
 	if err != nil {
 		return nil, errors.Wrapf(err, "directory.List failed for %s", path)
 	}
 	for _, dr := range dirs {
-		children = append(children, fmt.Sprintf("%s/%s", strings.Join(path, "/"), dr))
+		node.Children = append(node.Children, fmt.Sprintf("%s/%s", strings.Join(path, "/"), dr))
 		p := path[:] // clone
 		p = append(p, dr)
 		subDirs, err = s.dir(p)
 		if err != nil {
 			return nil, errors.Wrapf(err, "directory.List failed for %+v", p)
 		}
-		children = append(children, subDirs...)
+		desc = append(desc, subDirs...)
 	}
-	return children, nil
+	desc = append(desc, node)
+	return desc, nil
 }
 
-func (s *Surveyor) GetAllDirectories() (directories []string, err error) {
+func (s *Surveyor) GetAllDirectories() (directories DirListing, err error) {
 
-	directories, err = s.dir(nil)
+	dirs, err := s.dir(nil)
 	if err != nil {
 		return directories, errors.Wrapf(err, "List failed")
 	}
-	/*
-		subspace := subspace.AllKeys()
-		if err != nil {
-			return directories, errors.Wrapf(err, "AllKeys failed")
-		}
-		b, e := subspace.FDBRangeKeys()
-		fmt.Printf("AllKeys(): %s-%s", b, e)
 
-		b2 := subspace.Bytes()
-		fmt.Printf("Bytes(): %s", b2)
-	*/
+	directories = make(DirListing, len(dirs))
+	for _, dir := range dirs {
+		directories[dir.FlattenedPath] = dir
+	}
 	return directories, nil
 }

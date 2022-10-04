@@ -37,7 +37,7 @@ var treeCmd = &cobra.Command{
 			log.Fatalf("GetAllDirectories errored: %+v", err)
 		}
 		for _, dir := range dirs {
-			gLogger.Info("Directory", zap.String("path", dir))
+			gLogger.Info("Directory", zap.Any("dir", dir))
 		}
 	},
 }
