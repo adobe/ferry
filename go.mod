@@ -25,4 +25,4 @@ require (
 
 // uncomment during local developement across both repos
 // replace github.com/adobe/blackhole => ../blackhole
-replace github.com/adobe/blackhole => ../blackhole
+// replace github.com/adobe/blackhole => ../blackhole
