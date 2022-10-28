@@ -1,5 +1,10 @@
 port: 8001
 threads: 10 # Reader threads per node
-tls:
-  cert: ./server.crt
-  privkey: ./server.key
+tls_ferry:
+  cert: /etc/foundationdb/pki/client-server.crt
+  privkey: /etc/foundationdb/pki/client-server.key
+  ca: /etc/foundationdb/pki/ca.crt
+tls_fdb:
+  cert: /etc/foundationdb/pki/client-server.crt
+  privkey: /etc/foundationdb/pki/client-server.key
+  ca: /etc/foundationdb/pki/ca.crt
