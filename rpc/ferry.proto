@@ -40,9 +40,10 @@ message Time {
 
 message Target {
     string target_url = 1;
-    int32 readerThreads = 2;
+    int32 reader_threads = 2;
     bool compress = 3;
-    bool samplingMode = 4;
+    int32 read_percent = 4;
+    string export_format = 5;
 }
 
 message KeyRequest {
@@ -65,6 +66,15 @@ message KeyRangeResponse {
     string file_url = 6; // only set on success
 }
 
+message FinalizedFile {
+    string  file_name = 1;
+    string  key_range = 2;
+    string  checksum = 3;
+    int64   content_size = 4;
+    int64   row_count = 5;
+    bool    shell_only = 6;
+}
+
 message SessionResponse {
     enum OpStatus {
         SUCCESS = 0;
@@ -79,7 +89,7 @@ message SessionResponse {
     SessionState state = 2; // final state of session
     string session_id = 3; // session_id for the app level session
     string error_details = 4; // only set on success
-    repeated string finalized_files = 5;
+    repeated FinalizedFile finalized_files = 5;
 }
 
 message Session {

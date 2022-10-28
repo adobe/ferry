@@ -14,7 +14,7 @@ package cmd
 
 import (
 	"github.com/adobe/ferry/exporter/client"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/adobe/ferry/finder"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -23,21 +23,25 @@ import (
 // exportCmd represents the export command
 var exportCmd = &cobra.Command{
 	Use:   "export",
-	Short: "Export all (or filtered set of) keys and values from FoundationDB",
+	Short: "Export all keys and values from FoundationDB",
 	Long: `This utility will export all (or filtered) data from FoundationDB 
 to one of the possible stores - a local file-system folder, Azure blobstore or Amazon S3
 Export is not done in a single transaction and that implies you should only do this
 if your data is static or you don't care for it being a point-in-time snapshot`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fdb.MustAPIVersion(620)
-		// Open the default database from the system cluster
-		db := fdb.MustOpenDefault()
-		exp, err := client.NewExporter(db,
+
+		finder, err := finder.NewFinder(gFDB, finder.Logger(gLogger))
+		if err != nil {
+			gLogger.Fatal("Error initializing finder", zap.Error(err))
+		}
+
+		exp, err := client.NewExporter(gFDB,
 			storeURL, viper.GetInt("port"),
-			viper.GetString("tls.cert"),
+			viper.GetString("tls_ferry.ca"),
 			client.Logger(gLogger),
 			client.Dryrun(viper.GetBool("dryrun")),
-			client.Sample(viper.GetBool("sample")),
+			client.Sample(viper.GetInt("read-percent")),
+			client.ExportFormat(viper.GetString("export-format")),
 			client.Compress(viper.GetBool("compress")),
 			client.ReaderThreads(viper.GetInt("threads")),
 			client.Collect(viper.GetString("collect")),
@@ -45,11 +49,11 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 		if err != nil {
 			gLogger.Fatal("Error initializing exporter", zap.Error(err))
 		}
-		bKeys, err := exp.GetBoundaryKeys()
+		bKeys, err := finder.GetBoundaryKeys()
 		if err != nil {
 			gLogger.Fatal("Error fetching boundary keys", zap.Error(err))
 		}
-		partitionMap, err := exp.GetLocations(bKeys)
+		partitionMap, err := finder.GetLocations(bKeys)
 		if err != nil {
 			gLogger.Fatal("Error fetching locations", zap.Error(err))
 		}
@@ -76,7 +80,8 @@ func init() {
 	// config file useless)
 	// ------------------------------------------------------------------------
 	exportCmd.Flags().BoolP("dryrun", "n", false, "Dryrun connectivity check")
-	exportCmd.Flags().BoolP("sample", "m", false, "Sample - fetch only 1000 keys per range")
+	exportCmd.Flags().IntP("read-percent", "r", 100, "Read all (100%) or sample, say 10%")
+	exportCmd.Flags().StringP("export-format", "f", "archive", "archive|keys")
 	exportCmd.Flags().BoolP("compress", "c", false, "Compress export files (.lz4)")
 	exportCmd.Flags().IntP("threads", "t", 0, "How many threads per range")
 	exportCmd.Flags().StringP("collect", "", "", "Bring exported files to this host at this directory. Only applies to file:// targets")

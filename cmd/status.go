@@ -15,32 +15,34 @@ import (
 	"fmt"
 
 	"github.com/adobe/ferry/fdbstat"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
+var print_hosts bool
+
 // statusCmd represents the manage command
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Print fdb status",
-	Long:  `Print fdb status`,
+	Short: "Print fdb status [ DO NOT USE: Incomplete ]",
+	Long:  `Print fdb status [ DO NOT USE: Incomplete ]`,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		fdb.MustAPIVersion(620)
-		// Open the default database from the system cluster
-		db := fdb.MustOpenDefault()
-
-		status, err := fdbstat.GetStatus(db)
+		status, err := fdbstat.GetStatus(gFDB)
 		if err != nil {
 			gLogger.Fatal("Status failed", zap.Error(err))
 		}
-		fmt.Println(status)
-		hosts, err := fdbstat.GetNodesFromStatus(status)
-		if err != nil {
-			gLogger.Fatal("Status failed", zap.Error(err))
+		if !print_hosts {
+			fmt.Println(status)
+		} else {
+			hosts, err := fdbstat.GetNodesFromStatus(status)
+			if err != nil {
+				gLogger.Fatal("Status failed", zap.Error(err))
+			}
+			for _, host := range hosts {
+				fmt.Println(host)
+			}
 		}
-		fmt.Println(hosts)
 	},
 }
 
@@ -53,4 +55,6 @@ func init() {
 	// set them here, it will always override what is in .ferry.yaml (making the
 	// config file useless)
 	// ------------------------------------------------------------------------
+
+	statusCmd.Flags().BoolVarP(&print_hosts, "hosts", "", false, "Print only hosts")
 }

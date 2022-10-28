@@ -33,14 +33,15 @@ type ExporterSession struct {
 	wgReaders      *sync.WaitGroup
 	wgStaters      *sync.WaitGroup
 	logger         *zap.Logger
-	samplingMode   bool
+	readPercent    int
+	exportFormat   string
 	results        Results
 	// state          SessionState
 }
 
 type Results struct {
-	finalizedFiles   []string
-	finalizedDetails map[string]common.ArchiveFileStats
+	finalizedFiles   map[string]bool
+	finalizedDetails map[string]common.ArchiveFileDetails
 	sync.Mutex
 	// To facilitate concurrent access to slice above
 	// since slice is updated at end-of-run only, the
@@ -50,10 +51,10 @@ type Results struct {
 type readerStat struct {
 	keysRead   int64
 	bytesSaved int64
-	fileName   string
+	//fileName   string
 }
 
-func NewSession(db fdb.Database, targetURL string, readerThreads int, compress bool, logger *zap.Logger, samplingMode bool) (es *ExporterSession, err error) {
+func NewSession(db fdb.Database, targetURL string, readerThreads int, compress bool, logger *zap.Logger, readPercent int, exportFormat string) (es *ExporterSession, err error) {
 
 	sessionID, err := uuid.NewRandom()
 	if err != nil {
@@ -72,10 +73,12 @@ func NewSession(db fdb.Database, targetURL string, readerThreads int, compress b
 		readerStatChan: make(chan readerStat),
 		wgReaders:      &sync.WaitGroup{},
 		wgStaters:      &sync.WaitGroup{},
-		samplingMode:   samplingMode,
+		readPercent:    readPercent,
+		exportFormat:   exportFormat,
 	}
 
-	es.results.finalizedDetails = make(map[string]common.ArchiveFileStats)
+	es.results.finalizedDetails = make(map[string]common.ArchiveFileDetails)
+	es.results.finalizedFiles = make(map[string]bool)
 	if es.readerThreads <= 0 {
 		es.readerThreads = 1
 	}
@@ -104,7 +107,7 @@ func (es *ExporterSession) GetSessionID() string {
 }
 
 func (es *ExporterSession) IsResultFile(targetURL, fileName string) bool {
-	_, ok := es.results.finalizedDetails[fileName]
+	_, ok := es.results.finalizedFiles[fileName]
 	return ok && targetURL == es.targetURL
 }
 
@@ -112,7 +115,7 @@ func (es *ExporterSession) Send(krange fdb.KeyRange) {
 	es.readerKeysChan <- krange
 }
 
-func (es *ExporterSession) Finalize() (finalPaths []string) {
+func (es *ExporterSession) Finalize() (finalizedDetails map[string]common.ArchiveFileDetails) {
 
 	// ---------------------------------------------------
 	// WARNING: Order of channel close and .Wait()s are
@@ -136,6 +139,6 @@ func (es *ExporterSession) Finalize() (finalPaths []string) {
 		es.readerStatChan = nil
 	}
 
-	es.logger.Warn("Finalize()", zap.Strings("files", es.results.finalizedFiles))
-	return es.results.finalizedFiles
+	es.logger.Warn("Finalize()", zap.Any("files", es.results.finalizedDetails))
+	return es.results.finalizedDetails
 }

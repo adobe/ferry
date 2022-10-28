@@ -33,29 +33,11 @@ type ExporterClient struct {
 
 	// Optional, set via ExporterOptions
 	dryRun        bool
-	samplingMode  bool
+	readPercent   int
 	compress      bool
 	readerThreads int
 	collectDir    string
-}
-
-// storageGroup represents a set of ranges hosted by a single node
-// A slice of storageGroup representing entire cluster will have many ranges
-// with overlapping contents - since same range will be stored in multiple nodes.
-type storageGroup struct {
-	kranges []fdb.KeyRange
-	// host    string
-}
-
-// rangeLocation represents a set of hosts holding the given range.
-type rangeLocation struct {
-	krange fdb.KeyRange
-	hosts  []string
-}
-
-type partitionMap struct {
-	nodes  map[string]storageGroup
-	ranges []rangeLocation
+	exportFormat  string
 }
 
 // exportGroup is a dynamic data derived from []storageGroup
@@ -124,8 +106,14 @@ func Collect(collectDir string) ExporterOption {
 	}
 }
 
-func Sample(sample bool) ExporterOption {
+func Sample(sample int) ExporterOption {
 	return func(exp *ExporterClient) {
-		exp.samplingMode = sample
+		exp.readPercent = sample
+	}
+}
+
+func ExportFormat(format string) ExporterOption {
+	return func(exp *ExporterClient) {
+		exp.exportFormat = format
 	}
 }

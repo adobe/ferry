@@ -9,49 +9,41 @@ the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTA
 OF ANY KIND, either express or implied. See the License for the specific language
 governing permissions and limitations under the License.
 */
-
 package cmd
 
 import (
-	"github.com/adobe/ferry/importer/client"
+	"log"
+
+	"github.com/adobe/ferry/fdbstat"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
-// importCmd represents the import command
-var importCmd = &cobra.Command{
-	Use:   "import",
-	Short: "Import all (or filtered set of) keys and values from an export",
-	Long: `Import data from the set of files created via the 'export' sub-command earlier.
-Import all data or a subset of keys to a target FoundationDB instance 
-`,
+// statusCmd represents the manage command
+var treeCmd = &cobra.Command{
+	Use:   "tree",
+	Short: "Print tree of directories",
+	Long:  `Print tree of directories (like unix tree command)`,
+
 	Run: func(cmd *cobra.Command, args []string) {
-		exp, err := client.NewImporter(gFDB,
-			storeURL, viper.GetInt("port"),
-			viper.GetString("tls_ferry.ca"),
-			client.Logger(gLogger),
-			client.Dryrun(viper.GetBool("dryrun")),
-			client.Sample(viper.GetBool("sample")),
-			client.WriterThreads(viper.GetInt("threads")),
-		)
+
+		srvy, err := fdbstat.NewSurveyor(gFDB, fdbstat.Logger(gLogger))
 		if err != nil {
-			gLogger.Fatal("Error initializing exporter", zap.Error(err))
-		}
-		importPlan, err := exp.AssignTargets()
-		if err != nil {
-			gLogger.Fatal("Error assigning export nodes", zap.Error(err))
+			gLogger.Fatal("Error initializing finder", zap.Error(err))
 		}
 
-		err = exp.ScheduleImport(importPlan)
+		dirs, err := srvy.GetAllDirectories()
 		if err != nil {
-			gLogger.Fatal("Error scheduling exports", zap.Error(err))
+			log.Fatalf("GetAllDirectories errored: %+v", err)
+		}
+		for _, dir := range dirs {
+			gLogger.Info("Directory", zap.Any("dir", dir))
 		}
 	},
 }
 
 func init() {
-	//rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(treeCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as
@@ -59,5 +51,4 @@ func init() {
 	// set them here, it will always override what is in .ferry.yaml (making the
 	// config file useless)
 	// ------------------------------------------------------------------------
-	importCmd.Flags().StringVarP(&storeURL, "store-url", "s", "/tmp/", "Source/target for export/import/manage")
 }

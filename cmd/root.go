@@ -14,9 +14,12 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 	"os"
 
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	homedir "github.com/mitchellh/go-homedir"
+	"github.com/pkg/errors"
 	"github.com/pkg/profile"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -28,6 +31,7 @@ var cfgFile string
 var storeURL string
 var gLogger *zap.Logger
 var verbose bool
+var quiet bool
 
 var profilingRequested string // see github.com/pkg/profile
 var profilesAvailable = map[string]func(*profile.Profile){
@@ -39,11 +43,8 @@ var ProfileStarted interface{ Stop() }
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "ferry",
-	Short: "Set of utilities to export data from or import data into FoundationDB",
-	Long: `This utility will export all (or filtered) data from FoundationDB 
-to one of the possible stores - a local file-system folder, Azure blobstore or Amazon S3
-Export is not done in a single transaction and that implies you should only do this
-if your data is static or you don't care for it being a point-in-time snapshot`,
+	Short: "Set of utilities to manage data stored in FoundationDB",
+	Long:  `Set of utilities to manage data stored in FoundationDB`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
@@ -80,8 +81,62 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Quiet (logs only WARN or above)")
 	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to (applies to `serve` and `export` commands")
 
+}
+
+var gFDB fdb.Database
+var gFDBinitalized bool
+
+func initFDB() {
+	var err error
+
+	if !gFDBinitalized {
+
+		fdb.MustAPIVersion(710)
+
+		tlsConfig := viper.Get("tls_fdb")
+		if v, ok := tlsConfig.(map[string]interface{}); ok && v != nil {
+			no := fdb.Options()
+			// verifyOptions := "O=Adobe, Inc., CN=fdb.adobe.net"
+			verifyOptions := "Check.Valid=0"
+			err = no.SetTLSVerifyPeers([]byte(verifyOptions))
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set verify options to >%s<: %w", verifyOptions, err))
+			}
+			certFile, ok := v["cert"].(string)
+			if !ok || certFile == "" {
+				log.Fatalf("%+v", errors.New("\"tls\" key must include a string subkey \"cert\""))
+			}
+			err = no.SetTLSCertPath(certFile)
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set cert path to %s: %w", certFile, err))
+			}
+			gLogger.Debug("Setting cert file to", zap.String("file", certFile))
+			privKeyFile, ok := v["privkey"].(string)
+			if !ok || privKeyFile == "" {
+				log.Fatalf("%+v", errors.New("\"tls\" key must include a string subkey \"privkey\""))
+			}
+			err = no.SetTLSKeyPath(privKeyFile)
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set private key path to %s: %w", privKeyFile, err))
+			}
+			gLogger.Debug("Setting private key file to", zap.String("file", privKeyFile))
+
+			caFile, ok := v["ca"].(string)
+			if !ok || caFile == "" {
+				log.Fatalf("%+v", errors.New("\"tls\" key must include a string subkey \"ca\""))
+			}
+			err = no.SetTLSCaPath(caFile)
+			if err != nil {
+				log.Fatalf("%+v", fmt.Errorf("unable to set ca file path to %s: %w", caFile, err))
+			}
+			gLogger.Debug("Setting CA file to", zap.String("file", caFile))
+		}
+		gFDB = fdb.MustOpenDefault()
+		gFDBinitalized = true
+	}
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -108,11 +163,17 @@ func initConfig() {
 
 	viper.AutomaticEnv() // read in environment variables that match
 
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		// CAN'T USE ZAP - Logger not initilized yet
-		fmt.Printf("Using config file: %+v\n", viper.ConfigFileUsed())
+	err := viper.ReadInConfig()
+	if err != nil {
+		fmt.Printf("WARNING: No config file found. Please create a `.ferry.yaml`\n")
 	}
+	/*
+		// If a config file is found, read it in.
+		if err := viper.ReadInConfig(); err == nil {
+			// CAN'T USE ZAP - Logger not initilized yet
+			fmt.Printf("Using config file: %+v\n", viper.ConfigFileUsed())
+		}
+	*/
 
 	for _, v := range []string{"port"} { // PERSISTENT FLAGS SET AT ROOT
 		if pf := rootCmd.PersistentFlags().Lookup(v); pf != nil {
@@ -130,7 +191,7 @@ func initConfig() {
 	}
 
 	// FLAGS SPECIFIC TO EXPORT
-	for _, v := range []string{"dryrun", "sample", "compress", "threads", "collect"} {
+	for _, v := range []string{"dryrun", "read-percent", "export-format", "compress", "threads", "collect"} {
 		if pf := exportCmd.Flags().Lookup(v); pf != nil {
 			err := viper.BindPFlag(v, pf)
 			if err != nil {
@@ -144,6 +205,23 @@ func initConfig() {
 			os.Exit(1)
 		}
 	}
+	/*
+		// FLAGS SPECIFIC TO STATS COMMAND
+		for _, v := range []string{"threads"} {
+			if pf := statsCmd.Flags().Lookup(v); pf != nil {
+				err := viper.BindPFlag(v, pf)
+				if err != nil {
+					// CAN'T USE ZAP - Logger not initilized yet
+					fmt.Printf("Error from BindPFlag (scanCmd): %+v\n", err)
+					os.Exit(1)
+				}
+			} else {
+				// CAN'T USE ZAP - Logger not initilized yet
+				fmt.Println("ERROR: Unknown flag ", v)
+				os.Exit(1)
+			}
+		}
+	*/
 
 	if profilingRequested != "" {
 		if p, ok := profilesAvailable[profilingRequested]; ok {
@@ -151,31 +229,39 @@ func initConfig() {
 			ProfileStarted = profile.Start(p, profile.ProfilePath("."))
 		} else {
 			// CAN'T USE ZAP - Logger not initilized yet
-			fmt.Printf("Unknown profiling mode: %s\n", profilingRequested)
+			fmt.Printf("ERROR: Unknown profiling mode: %s\n", profilingRequested)
 			os.Exit(1)
 		}
 	}
 
 	zapLevel := zapcore.InfoLevel
+	if verbose && quiet {
+		fmt.Printf("ERROR: Both verbose and quiet flags are turned on!")
+		os.Exit(-1)
+	}
 	if verbose {
-		fmt.Println("Verbose logging")
 		zapLevel = zapcore.DebugLevel
+	}
+	if quiet {
+		zapLevel = zapcore.WarnLevel
 	}
 	zapConfig := zap.Config{
 		Level:             zap.NewAtomicLevelAt(zapLevel),
 		DisableCaller:     true,
 		DisableStacktrace: true,
 		Development:       verbose,
-		Encoding:          "console",
+		Encoding:          "json",
 		EncoderConfig:     zap.NewDevelopmentEncoderConfig(),
 		OutputPaths:       []string{"stderr"},
 		ErrorOutputPaths:  []string{"stderr"},
 	}
-	var err error
+
 	gLogger, err = zapConfig.Build()
 	if err != nil {
 		// CAN'T USE ZAP - Logger not initilized yet
 		fmt.Println(err)
 		os.Exit(1)
 	}
+
+	initFDB()
 }

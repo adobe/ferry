@@ -2,22 +2,65 @@
 
 ## Goals
 
-Provide a management utility to import and export data out of FoundationDB.
-There is experimental support for transparent write to `file://`, `s3://`, or `az://` urls. 
-`az://` is a non-standard shorthand for azure blobstore urls.
+A set of utilities to manage and inspect a FoundationDB cluster.
 
-## Non-Goals
+There is experimental support for transparent export and import daata to `file://`, `s3://`, or `az://` urls. `az://` is a non-standard shorthand for azure blobstore urls.
 
-The utility is not designed to replace the wonderful `fdbbackup` tool.
-We do not attempt to copy or follow the foundationdb mutation log.
-We are also unable to fetch the entire DB in one transaction because
-of the 5-second transaction limit. 
 
 ### Installation
 
 (Work in progress - Build repo using `go build`)
 
-### Quickstart
+### List hosts in cluster
+
+	$ ./ferry status --hosts
+	10.23.216.13
+	10.23.216.139
+	10.23.216.140
+	10.23.217.11
+
+### Quick stats on the DB
+
+	$ ./ferry stats -s 2>&1 | jq .
+	{
+	....
+	"M": "Total",
+	"size": 880916064143,
+	"Smallest": {
+		"Begin": "zFF",
+		"End": "\\xff"
+	},
+	"Smallest partition": 27760000,
+	"Biggest": {
+		"Begin": "6c52c",
+		"End": "6d184"
+	},
+	"Biggest partition": 208414113
+	}
+
+### Stats on each keyrange
+
+	$ ./ferry stats 2>&1 | jq -c '{x:.Begin,y:.End,z:.Size}'  | head -n10
+	{"x":"\\x15*\\x00\\x0297e94b9","y":"\\x15*\\x00\\x0297f0fd","z":71068750}
+	{"x":"\\x15*\\x00\\x02a4eb4db","y":"\\x15*\\x00\\x02a4fb9c","z":151350750}
+	{"x":"\\x15*\\x00\\x02c5612","y":"\\x15*\\x00\\x02c5702f","z":138096000}
+	{"x":"\\x17\\x1b:\\xfd\\x02C\\x003\\x00\\x00\\x07m8\\xfd","y":"\\x17\\x1b:\\xfd\\x02C\\x003\\x00\\x00\\x07m9\\xb0","z":53669780}
+	{"x":"f2402","y":"f2b14","z":122270666}
+	{"x":"\\x15*\\x00\\x020dda66","y":"\\x15*\\x00\\x020de468a","z":94358750}
+	{"x":"99fbe","y":"9abd6","z":205051641}
+	{"x":"\\x15*\\x00\\x02b153bb","y":"\\x15*\\x00\\x02b15af","z":64938000}
+	{"x":"\\x15*\\x00\\x02b6f3b37","y":"\\x15*\\x00\\x02b6fcf9","z":86584000}
+	{"x":"\\x15*\\x00\\x02ab469f","y":"\\x15*\\x00\\x02ab5373","z":120731250}
+
+### List prefixes by directory tree
+
+	$ ./ferry tree 2>&1 | jq -c '{"x": .dir.FlattenedPath, "y": .dir.PrefixPrintable}' | head -n 10
+	{"x":"uis_graph_graph_manager_benchmarks/1","y":"\\x17\\x1b>\\x10"}
+	{"x":"uis_graph_graph_manager_benchmarks/2000/2009","y":"\\x17\\x1b*\\x83"}
+	{"x":"uis_graph_graph_manager_benchmarks/2000/2010","y":"\\x17\\x1b@^"}
+	{"x":"uis_graph_graph_manager_benchmarks/3004/3000","y":"\\x17\\x1b!\\x8a"}
+
+### Export and import static data from Azure blobstore, S3, or local files.
 
     # Install TLS certificates and AWS/Azure credentails on all nodes
 	# in standard places. See 
@@ -36,30 +79,29 @@ of the 5-second transaction limit.
 ### Usage
 
 	$ ./ferry -h
-	This utility will export all (or filtered) data from FoundationDB
-	to one of the possible stores - a local file-system folder, Azure blobstore or Amazon S3
-	Export is not done in a single transaction and that implies you should only do this
-	if your data is static or you don't care for it being a point-in-time snapshot
+	Set of utilities to manage data stored in FoundationDB
 
 	Usage:
 	ferry [flags]
 	ferry [command]
 
 	Available Commands:
-	export      Export all (or filtered set of) keys and values from FoundationDB
+	completion  Generate the autocompletion script for the specified shell
+	export      Export all keys and values from FoundationDB
 	help        Help about any command
-	import      Import all (or filtered set of) keys and values from an export
 	info        Print info on effective config
-	manage      manages blobstore directory (list or delete recursively)
 	serve       Serve exporter grpc server
+	stats       Print stats about the current DB
+	status      Print fdb status [ DO NOT USE: Incomplete ]
+	tree        Print tree of directories
 
 	Flags:
-		--config string      config file (default is $HOME/.ferry.yaml)
-	-h, --help               help for ferry
-	-p, --port serve         Port to bind to (applies to serve and `export` commands
-		--profile string     mem|cpu (Go performance profiling)
-	-s, --store-url string   Source/target for export/import/manage (default "/tmp/")
-	-v, --verbose            Verbose logging
+		--config string    config file (default is $HOME/.ferry.yaml)
+	-h, --help             help for ferry
+	-p, --port serve       Port to bind to (applies to serve and `export` commands
+		--profile string   mem|cpu (Go performance profiling)
+	-q, --quiet            Quiet (logs only WARN or above)
+	-v, --verbose          Verbose logging
 
 	Use "ferry [command] --help" for more information about a command.
 
@@ -115,6 +157,6 @@ value-length = length & (1 << 18) - 1
 
 We may look at flatbuffer for output format, but that depends on subsequent usage needs
 
-# Architecture
+# Distributed Setup (Optional)
 
 ![ferry arch diagram](docs/ferry_arch.png)

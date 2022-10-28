@@ -118,7 +118,7 @@ func readRecord(ar archive.Archive) (key, value []byte, err error) {
 }
 
 func init() {
-	rootCmd.AddCommand(verifyCmd)
+	//rootCmd.AddCommand(verifyCmd)
 
 	// ------------------------------------------------------------------------
 	// PLEASE DO NOT SET ANY "DEFAULTS" for CLI arguments. Set them instead as

@@ -33,7 +33,8 @@ func (exp *Server) StartExportSession(ctx context.Context, tgt *ferry.Target) (*
 		int(tgt.ReaderThreads),
 		tgt.Compress,
 		exp.logger,
-		tgt.SamplingMode)
+		int(tgt.ReadPercent),
+		tgt.ExportFormat)
 	if err != nil {
 		exp.logger.Warn("Failed to create a session ID", zap.Error(err))
 		return nil, errors.Wrap(err, "Failed to create a session ID")
@@ -138,10 +139,21 @@ func (exp *Server) StopExportSession(ctx context.Context, fs *ferry.Session) (*f
 	finalPaths := es.Finalize()
 	exp.logger.Info("Released resources", zap.String("sessionID", fs.SessionId))
 
+	var protoFinalizedFiles []*ferry.FinalizedFile
+	for k, v := range finalPaths {
+		x := &ferry.FinalizedFile{}
+		x.Checksum = v.Checksum
+		x.RowCount = v.RowsWritten
+		x.ContentSize = v.BytesWritten
+		x.FileName = v.FileName
+		x.KeyRange = k
+		protoFinalizedFiles = append(protoFinalizedFiles, x)
+	}
+
 	return &ferry.SessionResponse{
 		SessionId:      fs.SessionId,
 		Status:         ferry.SessionResponse_SUCCESS,
-		FinalizedFiles: finalPaths,
+		FinalizedFiles: protoFinalizedFiles,
 	}, nil
 }
 
@@ -163,10 +175,20 @@ func (exp *Server) EndExportSession(ctx context.Context, fs *ferry.Session) (*fe
 	finalPaths := es.Finalize()
 	exp.logger.Info("Released resources", zap.String("sessionID", fs.SessionId))
 
+	var ferryFinalizedFiles []*ferry.FinalizedFile
+	for _, v := range finalPaths {
+		x := &ferry.FinalizedFile{}
+		x.Checksum = v.Checksum
+		x.RowCount = v.ChunksWritten
+		x.ContentSize = v.BytesWritten
+		x.FileName = v.FileName
+		ferryFinalizedFiles = append(ferryFinalizedFiles, x)
+	}
+
 	return &ferry.SessionResponse{
 		SessionId:      fs.SessionId,
 		Status:         ferry.SessionResponse_SUCCESS,
-		FinalizedFiles: finalPaths,
+		FinalizedFiles: ferryFinalizedFiles,
 	}, nil
 }
 
