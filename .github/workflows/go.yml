@@ -24,8 +24,9 @@ jobs:
 
     - name: Build
       run: |
-        wget https://github.com/apple/foundationdb/releases/download/7.1.15/foundationdb-clients_7.1.15-1_amd64.deb
-        dpkg -i foundationdb-clients_7.1.15-1_amd64.deb
+        wget -q https://github.com/apple/foundationdb/releases/download/7.1.15/foundationdb-clients_7.1.15-1_amd64.deb
+        sudo dpkg -i foundationdb-clients_7.1.15-1_amd64.deb
+        rm -fv foundationdb-clients_7.1.15-1_amd64.deb
         go build -v ./...
 
     - name: Test
