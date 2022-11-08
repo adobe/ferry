@@ -35,6 +35,7 @@ jobs:
         sudo dpkg -i foundationdb-clients_7.1.15-1_amd64.deb
         rm -fv foundationdb-clients_7.1.15-1_amd64.deb
         go build -v ./...
+        ls -alR
         tar cvzf ferry.x86_64.tar.gz ferry .ferry.yaml
 
     - name: Test
