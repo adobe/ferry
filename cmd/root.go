@@ -88,6 +88,7 @@ func init() {
 
 var gFDB fdb.Database
 var gFDBinitalized bool
+var clusterFile string
 
 func initFDB() {
 	var err error
@@ -95,6 +96,7 @@ func initFDB() {
 	if !gFDBinitalized {
 
 		fdb.MustAPIVersion(710)
+		clusterFile = viper.GetString("fdb_cluster")
 
 		tlsConfig := viper.Get("tls_fdb")
 		if v, ok := tlsConfig.(map[string]interface{}); ok && v != nil {
@@ -134,7 +136,7 @@ func initFDB() {
 			}
 			gLogger.Debug("Setting CA file to", zap.String("file", caFile))
 		}
-		gFDB = fdb.MustOpenDefault()
+		gFDB = fdb.MustOpenDatabase(clusterFile)
 		gFDBinitalized = true
 	}
 }
