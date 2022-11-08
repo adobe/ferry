@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
+      id: release-branch-checkout
+      with:
+        # Include tags by using fetch-depth=0
+        fetch-depth: 0
 
     - name: Set up Go
       uses: actions/setup-go@v3
