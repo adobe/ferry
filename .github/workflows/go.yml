@@ -22,12 +22,27 @@ jobs:
       with:
         go-version: 1.18
 
+    # Identify latest tag
+    - name: Identify the latest tag
+      id: identify-tag
+      run: |
+        git tag --sort=taggerdate | tail -1
+        echo "RELEASE_TAG=$(git tag --sort=taggerdate | tail -1)" >> $GITHUB_ENV
+
     - name: Build
       run: |
         wget -q https://github.com/apple/foundationdb/releases/download/7.1.15/foundationdb-clients_7.1.15-1_amd64.deb
         sudo dpkg -i foundationdb-clients_7.1.15-1_amd64.deb
         rm -fv foundationdb-clients_7.1.15-1_amd64.deb
         go build -v ./...
+        tar cvzf ferry.x86_64.tar.gz ferry .ferry.yaml
 
     - name: Test
       run: go test -v ./...
+      
+    - name: release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.RELEASE_TAG }}
+        files: |
+           ferry.x86_64.tar.gz
