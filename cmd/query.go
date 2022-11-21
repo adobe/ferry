@@ -19,12 +19,14 @@ import (
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
 var base64Output bool
-var dirPath string
+var dirPathInput string
+var subSpacePathInput string
 var key string
 
 // queryCmd represents the export command
@@ -33,20 +35,53 @@ var queryCmd = &cobra.Command{
 	Short: "Query for a given key",
 	Run: func(cmd *cobra.Command, args []string) {
 
-		path := strings.Split(dirPath, "/")
+		dirPath := strings.Split(dirPathInput, "/")
+		subSpacePath := strings.Split(subSpacePathInput, "/")
+
 		_, err := gFDB.ReadTransact(func(rt fdb.ReadTransaction) (interface{}, error) {
 
-			subSpace, err := directory.Open(rt, path, nil)
+			subSpace, err := directory.Open(rt, dirPath, nil)
 			if err != nil {
-				return nil, errors.Wrapf(err, "path=%+v", path)
+				return nil, errors.Wrapf(err, "path=%+v", dirPath)
 			}
-			fmt.Printf("Subspace key prefix = %+v\n", subSpace.Bytes())
+			fmt.Printf("Directory key prefix = %s\n", subSpace.FDBKey())
 
-			value, err := rt.Get(subSpace.FDBKey()).Get()
-			if err != nil {
-				return nil, errors.Wrapf(err, "path=%+v, key=%+v", path, key)
+			subSpaceTuples := []tuple.TupleElement{}
+			for _, ss := range subSpacePath {
+				subSpaceTuples = append(subSpaceTuples, tuple.TupleElement(ss))
 			}
-			fmt.Printf("Value = %+v\n", value)
+			keySpace := subSpace.Sub(subSpaceTuples...)
+			fmt.Printf("Subspace key prefix = %s\n", keySpace.FDBKey())
+
+			if len(key) > 0 {
+				fKey := keySpace.Pack(tuple.Tuple{[]byte(key)})
+				fmt.Printf("Final key = %s\n", fKey)
+				value, err := rt.Get(fKey).Get()
+				if err != nil {
+					return nil, errors.Wrapf(err, "path=%+v, key=%+v", dirPath, key)
+				}
+				fmt.Printf("Value = %+v\n", fdb.Printable(value))
+			} else {
+				var er fdb.ExactRange = keySpace.(fdb.ExactRange)
+				var bk, ek fdb.KeyConvertible
+				bk, ek = er.FDBRangeKeys()
+				var fr fdb.KeyRange = fdb.KeyRange{Begin: bk, End: ek}
+				fmt.Printf("Subspace key range = %+v\n", fr)
+				fKey := rt.GetRange(fr, fdb.RangeOptions{Limit: 100, Mode: fdb.StreamingModeSerial})
+				it := fKey.Iterator()
+				for it.Advance() {
+					// ---------------------------------------------------------
+					// uncomment line below for testing only
+					// time.Sleep(time.Millisecond * 1)
+					// This is to artifically create the 5 second txn limit test
+					// ---------------------------------------------------------
+					kv, err := it.Get()
+					if err != nil {
+						return nil, errors.Wrapf(err, "path=%+v, key=%+v", dirPath, subSpace.FDBKey())
+					}
+					fmt.Printf("Key = %+v, Value = %+v\n", fdb.Printable(kv.Key), fdb.Printable(kv.Value))
+				}
+			}
 
 			return nil, nil
 		})
@@ -67,5 +102,7 @@ func init() {
 	// config file useless)
 	// ------------------------------------------------------------------------
 	queryCmd.Flags().BoolVarP(&base64Output, "base64", "", false, "Print value as base64")
-	queryCmd.Flags().StringVarP(&dirPath, "path", "", "", "Directory path to open")
+	queryCmd.Flags().StringVarP(&dirPathInput, "directory", "", "", "Directory path to open")
+	queryCmd.Flags().StringVarP(&subSpacePathInput, "subspace", "", "", "Subspace path (inside directory) to open")
+	queryCmd.Flags().StringVarP(&key, "key", "", "", "Key to query")
 }
