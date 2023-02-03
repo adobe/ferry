@@ -44,23 +44,24 @@ var queryCmd = &cobra.Command{
 			if err != nil {
 				return nil, errors.Wrapf(err, "path=%+v", dirPath)
 			}
-			fmt.Printf("Directory key prefix = %s\n", subSpace.FDBKey())
+			log.Printf("Directory key prefix = %s\n", subSpace.FDBKey())
 
 			subSpaceTuples := []tuple.TupleElement{}
 			for _, ss := range subSpacePath {
 				subSpaceTuples = append(subSpaceTuples, tuple.TupleElement(ss))
 			}
 			keySpace := subSpace.Sub(subSpaceTuples...)
-			fmt.Printf("Subspace key prefix = %s\n", keySpace.FDBKey())
+			log.Printf("Subspace key prefix = %s\n", keySpace.FDBKey())
 
 			if len(key) > 0 {
 				fKey := keySpace.Pack(tuple.Tuple{[]byte(key)})
-				fmt.Printf("Final key = %s\n", fKey)
+				fmt.Printf("Final key = (%d length) %s\n", len(fKey), fKey)
 				value, err := rt.Get(fKey).Get()
 				if err != nil {
 					return nil, errors.Wrapf(err, "path=%+v, key=%+v", dirPath, key)
 				}
-				fmt.Printf("Value = %+v\n", fdb.Printable(value))
+				log.Printf("Value = (%d length) %+v\n", len(value), fdb.Printable(value))
+				fmt.Printf(fdb.Printable(value))
 			} else {
 				var er fdb.ExactRange = keySpace.(fdb.ExactRange)
 				var bk, ek fdb.KeyConvertible

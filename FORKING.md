@@ -31,6 +31,7 @@ In this method
                                OR
 	  replace github.com/adobe/ferry => github.com/your-name/ferry
 	  ```
+   1. See also [this github issue comment](https://github.com/golang/go/issues/39889#issuecomment-651344768)
 
    1. When you send a PR, [remember to avoid sending](https://stackoverflow.com/questions/28703140/pull-request-ignore-some-file-changes) the `go.mod` override.
 

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package = "github.com/adobe/ferry/lib/ferry";
+option go_package = "github.com/adobe/ferry/rpc/ferry";
 
 package ferry;
 
