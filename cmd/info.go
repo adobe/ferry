@@ -23,7 +23,7 @@ import (
 // infoCmd represents the manage command
 var infoCmd = &cobra.Command{
 	Use:   "info",
-	Short: "Print info on effective config",
+	Short: "✅ Print info on effective config",
 	Long:  `Print info on effective config`,
 
 	Run: func(cmd *cobra.Command, args []string) {

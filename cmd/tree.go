@@ -22,7 +22,7 @@ import (
 // statusCmd represents the manage command
 var treeCmd = &cobra.Command{
 	Use:   "tree",
-	Short: "Print tree of directories",
+	Short: "✅ Print tree of directories",
 	Long:  `Print tree of directories (like unix tree command)`,
 
 	Run: func(cmd *cobra.Command, args []string) {

@@ -21,7 +21,7 @@ import (
 // manageCmd represents the manage command
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Serve exporter grpc server",
+	Short: "❌ Serve exporter grpc server",
 	Long:  `Serve exporter grpc server`,
 
 	Run: func(cmd *cobra.Command, args []string) {

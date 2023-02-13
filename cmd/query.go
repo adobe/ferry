@@ -32,7 +32,7 @@ var key string
 // queryCmd represents the export command
 var queryCmd = &cobra.Command{
 	Use:   "query",
-	Short: "Query for a given key",
+	Short: "✅ Query for a given key",
 	Run: func(cmd *cobra.Command, args []string) {
 
 		dirPath := strings.Split(dirPathInput, "/")

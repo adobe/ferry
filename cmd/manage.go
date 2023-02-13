@@ -24,7 +24,7 @@ var manageAction string
 // manageCmd represents the manage command
 var manageCmd = &cobra.Command{
 	Use:   "manage",
-	Short: "manages blobstore directory (list or delete recursively)",
+	Short: "❌ manages blobstore directory (list or delete recursively)",
 	Long:  `This is used to cleanup blobstore directory structure. Use with caution`,
 
 	Run: func(cmd *cobra.Command, args []string) {

@@ -24,8 +24,8 @@ var print_hosts bool
 // statusCmd represents the manage command
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Print fdb status [ DO NOT USE: Incomplete ]",
-	Long:  `Print fdb status [ DO NOT USE: Incomplete ]`,
+	Short: "✅ Print fdb status",
+	Long:  `Print fdb status`,
 
 	Run: func(cmd *cobra.Command, args []string) {
 		status, err := fdbstat.GetStatus(gFDB)

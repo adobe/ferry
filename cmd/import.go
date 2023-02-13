@@ -22,7 +22,7 @@ import (
 // importCmd represents the import command
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import all (or filtered set of) keys and values from an export",
+	Short: "❌ Import all (or filtered set of) keys and values from an export",
 	Long: `Import data from the set of files created via the 'export' sub-command earlier.
 Import all data or a subset of keys to a target FoundationDB instance 
 `,

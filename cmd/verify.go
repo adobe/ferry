@@ -27,7 +27,7 @@ var fileName string
 // statusCmd represents the manage command
 var verifyCmd = &cobra.Command{
 	Use:   "verify",
-	Short: "Verify single archive file",
+	Short: "❌ Verify single archive file",
 	Long:  `Verify single archive file`,
 
 	Run: func(cmd *cobra.Command, args []string) {
