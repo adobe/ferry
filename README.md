@@ -6,10 +6,11 @@ A set of utilities to manage and inspect a FoundationDB cluster.
 
 There is experimental support for transparent export and import daata to `file://`, `s3://`, or `az://` urls. `az://` is a non-standard shorthand for azure blobstore urls.
 
-
 ### Installation
 
-(Work in progress - Build repo using `go build`)
+Clone the repo, and run
+
+    go build
 
 ### List hosts in cluster
 
