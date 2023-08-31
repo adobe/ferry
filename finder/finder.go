@@ -75,7 +75,7 @@ func Logger(logger *zap.Logger) FinderOption {
 
 }
 
-func (exp *Finder) GetLocations(boundaryKeys []fdb.Key) (pmap *PartitionMap, err error) {
+func (exp *Finder) GetLocations(boundaryKeys []fdb.Key, skipHostResolution bool) (pmap *PartitionMap, err error) {
 
 	// rangeLocation represents a set of hosts holding the given range.
 	type rangeLocationTemp struct {
@@ -96,18 +96,21 @@ func (exp *Finder) GetLocations(boundaryKeys []fdb.Key) (pmap *PartitionMap, err
 		} else {
 			endKey = boundaryKeys[i+1]
 		}
-		addresses, err := txn.LocalityGetAddressesForKey(beginKey).Get()
-		if err != nil {
-			txn.Commit()
-			if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
-				txn, err = exp.db.CreateTransaction()
-				if err != nil {
-					return nil, errors.Wrapf(err, "Unable to resume fdb transaction")
-				}
-			}
+		addresses := []string{}
+		if !skipHostResolution {
 			addresses, err = txn.LocalityGetAddressesForKey(beginKey).Get()
 			if err != nil {
-				return nil, errors.Wrapf(err, "LocalityGetAddressesForKey lookup failed!")
+				txn.Commit()
+				if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
+					txn, err = exp.db.CreateTransaction()
+					if err != nil {
+						return nil, errors.Wrapf(err, "Unable to resume fdb transaction")
+					}
+				}
+				addresses, err = txn.LocalityGetAddressesForKey(beginKey).Get()
+				if err != nil {
+					return nil, errors.Wrapf(err, "LocalityGetAddressesForKey lookup failed!")
+				}
 			}
 		}
 		locationsTemp = append(locationsTemp, rangeLocationTemp{

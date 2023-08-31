@@ -19,6 +19,7 @@ import (
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -28,6 +29,7 @@ var base64Output bool
 var dirPathInput string
 var subSpacePathInput string
 var key string
+var keyPrefix string
 
 // queryCmd represents the export command
 var queryCmd = &cobra.Command{
@@ -61,14 +63,21 @@ var queryCmd = &cobra.Command{
 					return nil, errors.Wrapf(err, "path=%+v, key=%+v", dirPath, key)
 				}
 				log.Printf("Value = (%d length) %+v\n", len(value), fdb.Printable(value))
-				fmt.Printf(fdb.Printable(value))
+				fmt.Print(fdb.Printable(value))
 			} else {
-				var er fdb.ExactRange = keySpace.(fdb.ExactRange)
 				var bk, ek fdb.KeyConvertible
-				bk, ek = er.FDBRangeKeys()
+				if len(keyPrefix) > 0 {
+					fKey := keySpace.Pack(tuple.Tuple{[]byte(keyPrefix)})
+					keySpace = subspace.FromBytes(fKey[:(len(fKey) - 1)])
+					var er fdb.ExactRange = keySpace.(fdb.ExactRange)
+					bk, ek = er.FDBRangeKeys()
+				} else {
+					var er fdb.ExactRange = keySpace.(fdb.ExactRange)
+					bk, ek = er.FDBRangeKeys()
+				}
 				var fr fdb.KeyRange = fdb.KeyRange{Begin: bk, End: ek}
 				fmt.Printf("Subspace key range = %+v\n", fr)
-				fKey := rt.GetRange(fr, fdb.RangeOptions{Limit: 100, Mode: fdb.StreamingModeSerial})
+				fKey := rt.GetRange(fr, fdb.RangeOptions{Limit: 10, Mode: fdb.StreamingModeSerial})
 				it := fKey.Iterator()
 				for it.Advance() {
 					// ---------------------------------------------------------
@@ -106,4 +115,5 @@ func init() {
 	queryCmd.Flags().StringVarP(&dirPathInput, "directory", "", "", "Directory path to open")
 	queryCmd.Flags().StringVarP(&subSpacePathInput, "subspace", "", "", "Subspace path (inside directory) to open")
 	queryCmd.Flags().StringVarP(&key, "key", "", "", "Key to query")
+	queryCmd.Flags().StringVarP(&keyPrefix, "keyPrefix", "", "", "Key prefix to query")
 }

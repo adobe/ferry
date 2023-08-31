@@ -53,7 +53,7 @@ if your data is static or you don't care for it being a point-in-time snapshot`,
 		if err != nil {
 			gLogger.Fatal("Error fetching boundary keys", zap.Error(err))
 		}
-		partitionMap, err := finder.GetLocations(bKeys)
+		partitionMap, err := finder.GetLocations(bKeys, false)
 		if err != nil {
 			gLogger.Fatal("Error fetching locations", zap.Error(err))
 		}

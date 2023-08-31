@@ -1,6 +1,7 @@
 package fdbstat
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"time"
@@ -16,7 +17,17 @@ type HashableKeyRange struct {
 	Begin string
 	End   string
 }
+type KeyRangeStats struct {
+	Begin []byte
+	End   []byte
+	Size  int64
+}
 
+type DirSizeGuestimate struct {
+	Size       int64
+	LowerBound int64
+	UpperBound int64
+}
 type PendingResponse struct {
 	Kr HashableKeyRange
 	Fi fdb.FutureInt64
@@ -29,17 +40,28 @@ func NewHashableKeyRange(kr fdb.KeyRange) HashableKeyRange {
 	}
 }
 
-func (s *Surveyor) CalculateDBSize(pmap *finder.PartitionMap) (sizeByRange map[HashableKeyRange]int64, err error) {
+func NewKeyRangeStats(kr fdb.KeyRange, size int64) KeyRangeStats {
+	s := KeyRangeStats{}
+	s.Begin = append(s.Begin, kr.Begin.FDBKey()...)
+	s.End = append(s.Begin, kr.End.FDBKey()...)
+	s.Size = size
+	return s
+}
+func (s *Surveyor) CalculateDBSize(pmap *finder.PartitionMap) (sizeByRange map[HashableKeyRange]KeyRangeStats, err error) {
 
 	txn, err := s.db.CreateTransaction()
 	if err != nil {
 		return nil, err
 	}
-	sizeByRange = make(map[HashableKeyRange]int64)
+	sizeByRange = make(map[HashableKeyRange]KeyRangeStats)
+
+	rangesAnalyzed := 0
 	for _, v := range pmap.Ranges {
 
 		for {
-			sizeByRange[NewHashableKeyRange(v.Krange)], err = txn.GetEstimatedRangeSizeBytes(v.Krange).Get()
+			kvKey := NewHashableKeyRange(v.Krange)
+			var size int64
+			size, err = txn.GetEstimatedRangeSizeBytes(v.Krange).Get()
 			if err != nil {
 				if errFDB, ok := err.(fdb.Error); ok && errFDB.Code == 1007 { // txn too old
 					s.logger.Debug("Txn is old. Restarting")
@@ -52,12 +74,95 @@ func (s *Surveyor) CalculateDBSize(pmap *finder.PartitionMap) (sizeByRange map[H
 				}
 				return nil, err
 			}
+			sizeByRange[kvKey] = NewKeyRangeStats(v.Krange, size)
+
+			s.logger.Debug("Estimated size",
+				zap.String("begin", kvKey.Begin),
+				zap.String("end", kvKey.End),
+				zap.Int64("size", sizeByRange[kvKey].Size))
+			rangesAnalyzed++
+			if rangesAnalyzed%10 == 0 {
+				s.logger.Info("CalculateDBSize", zap.Int("ranges analyzed", rangesAnalyzed))
+			}
 			break
 		}
 	}
 	txn.Commit()
 
 	return sizeByRange, nil
+}
+
+func (s *Surveyor) EstimateDirectorySize(sizeByRange map[HashableKeyRange]KeyRangeStats, directories DirListing) (err error) {
+
+	dirEstimate := map[string]DirSizeGuestimate{}
+
+	for dirName, dir := range directories {
+		// Find out how many ranges does dir.Prefix span
+
+		for _, v := range sizeByRange {
+
+			dirEnd := append([]byte(nil), dir.Prefix...)
+			dirEnd = append(dirEnd, byte('\xFF'))
+
+			//s.logger.Info("!!!!DEBUG!!!!", zap.String("debug",
+			//	fmt.Sprintf("Comparing %+v with %+v and %+v", dir.Prefix, v.Begin, v.End)))
+			count_once_only := 0
+
+			if bytes.Compare(dir.Prefix, v.Begin) >= 0 && bytes.Compare(dirEnd, v.End) < 0 {
+				count_once_only++
+				// DIRECTORY IS COMPLETELY CONTAINED WITHIN THE PARTITION RANGE
+				x := dirEstimate[dirName]
+				x.Size += v.Size
+				// x.LowerBound += v // DON'T ADD TO LOWERBOUND since directory might just barely be in the range.
+				x.UpperBound += v.Size
+				dirEstimate[dirName] = x
+			} else if bytes.Compare(dir.Prefix, []byte(v.Begin)) >= 0 && bytes.Compare(dir.Prefix, []byte(v.End)) < 0 && bytes.Compare(dirEnd, v.End) >= 0 {
+				count_once_only++
+				// DIRECTORY OVERLAPS PARTITION - Directory start is between partition BEGIN and END
+				// DIRECTORY OVERLAPS PARTITION - Directory end is past partition END
+				x := dirEstimate[dirName]
+				x.Size += v.Size
+				// x.LowerBound += v // DON'T ADD TO LOWERBOUND since directory might just barely be in the range.
+				x.UpperBound += v.Size
+				dirEstimate[dirName] = x
+			} else if bytes.Compare(dir.Prefix, []byte(v.Begin)) < 0 && bytes.Compare(dirEnd, []byte(v.Begin)) >= 0 && bytes.Compare(dirEnd, v.End) < 0 {
+				count_once_only++
+				// DIRECTORY OVERLAPS PARTITION - Directory start is before BEGIN
+				// DIRECTORY OVERLAPS PARTITION - Directory end is between partition BEGIN and END
+				x := dirEstimate[dirName]
+				x.Size += v.Size
+				// x.LowerBound += v // DON'T ADD TO LOWERBOUND since directory might just barely be in the range.
+				x.UpperBound += v.Size
+				dirEstimate[dirName] = x
+			} else if bytes.Compare(dirEnd, []byte(v.Begin)) < 0 || bytes.Compare(dir.Prefix, []byte(v.End)) >= 0 {
+				count_once_only++
+				// DIRECTORY IS COMPLETELY OUTSIDE THE PARTITION RANGE
+			} else if bytes.Compare(dir.Prefix, []byte(v.Begin)) < 0 && bytes.Compare(dirEnd, []byte(v.End)) >= 0 {
+				count_once_only++
+				// PARTITION RANGE IS COMPLETELY WITHIN THE DIRECTORY RANGE
+				x := dirEstimate[dirName]
+				x.Size += v.Size
+				x.LowerBound += v.Size // Range is well within directory range.
+				x.UpperBound += v.Size
+				dirEstimate[dirName] = x
+			}
+			if count_once_only != 1 {
+				s.logger.Fatal("Logic bug!", zap.Int("count", count_once_only),
+					zap.String("dirPrefix", fmt.Sprintf("%+v", dir.Prefix)),
+					zap.String("dirEnd", fmt.Sprintf("%+v", dirEnd)),
+					zap.String("range-begin", fmt.Sprintf("%+v", v.Begin)),
+					zap.String("range-end", fmt.Sprintf("%+v", v.End)),
+					zap.Int64("range-size", v.Size))
+			}
+		}
+		x := dirEstimate[dirName]
+		s.logger.Info("Directory size",
+			zap.String("Directory", dirName),
+			zap.Int64("Guess", x.Size),
+			zap.Int64("Upperbound", x.UpperBound),
+			zap.Int64("LowerBound", x.LowerBound))
+	}
+	return nil
 }
 
 func (s *Surveyor) CalculateDBSizeAsync(pmap *finder.PartitionMap) (sizeByRange map[HashableKeyRange]int64, totalSize int64, err error) {

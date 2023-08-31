@@ -33,6 +33,8 @@ var gLogger *zap.Logger
 var verbose bool
 var quiet bool
 
+var runTag string
+
 var profilingRequested string // see github.com/pkg/profile
 var profilesAvailable = map[string]func(*profile.Profile){
 	"mem": profile.MemProfile,
@@ -82,6 +84,7 @@ func init() {
 	// when this action is called directly.
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose logging")
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Quiet (logs only WARN or above)")
+	rootCmd.PersistentFlags().StringVarP(&runTag, "run-tag", "", "", "Tag this string to all logs")
 	rootCmd.PersistentFlags().IntP("port", "p", 0, "Port to bind to (applies to `serve` and `export` commands")
 
 }
@@ -256,6 +259,7 @@ func initConfig() {
 		EncoderConfig:     zap.NewDevelopmentEncoderConfig(),
 		OutputPaths:       []string{"stderr"},
 		ErrorOutputPaths:  []string{"stderr"},
+		InitialFields:     map[string]interface{}{"tag": runTag},
 	}
 
 	gLogger, err = zapConfig.Build()

@@ -12,6 +12,8 @@ governing permissions and limitations under the License.
 package cmd
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 
 	"github.com/adobe/ferry/fdbstat"
@@ -33,7 +35,14 @@ var statusCmd = &cobra.Command{
 			gLogger.Fatal("Status failed", zap.Error(err))
 		}
 		if !print_hosts {
-			fmt.Println(status)
+			// fmt.Println(status)
+			var out bytes.Buffer
+			err := json.Indent(&out, []byte(status), "", "  ")
+			if err != nil {
+				gLogger.Fatal("Json parsing failed", zap.Error(err))
+			}
+			fmt.Println(out.String())
+
 		} else {
 			hosts, err := fdbstat.GetNodesFromStatus(status)
 			if err != nil {
