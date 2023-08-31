@@ -63,7 +63,7 @@ var queryCmd = &cobra.Command{
 					return nil, errors.Wrapf(err, "path=%+v, key=%+v", dirPath, key)
 				}
 				log.Printf("Value = (%d length) %+v\n", len(value), fdb.Printable(value))
-				fmt.Printf(fdb.Printable(value))
+				fmt.Print(fdb.Printable(value))
 			} else {
 				var bk, ek fdb.KeyConvertible
 				if len(keyPrefix) > 0 {

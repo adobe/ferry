@@ -17,6 +17,7 @@ import (
 	"github.com/adobe/ferry/finder"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"log"
 )
 
 var summary bool
@@ -35,10 +36,13 @@ var statsCmd = &cobra.Command{
 		if err != nil {
 			gLogger.Fatal("Error fetching boundary keys", zap.Error(err))
 		}
-		pmap, err := finder.GetLocations(bKeys)
+		gLogger.Info("GetBoundaryKeys done", zap.Int("count", len(bKeys)))
+
+		pmap, err := finder.GetLocations(bKeys, true)
 		if err != nil {
 			gLogger.Fatal("Error fetching locations", zap.Error(err))
 		}
+		gLogger.Info("GetLocations done")
 
 		srvy, err := fdbstat.NewSurveyor(gFDB, fdbstat.Logger(gLogger))
 		if err != nil {
@@ -49,27 +53,44 @@ var statsCmd = &cobra.Command{
 		if err != nil {
 			gLogger.Fatal("Error fetching estimated size", zap.Error(err))
 		}
+		gLogger.Info("CalculateDBSize done")
+
+		dirs, err := srvy.GetAllDirectories()
+		if err != nil {
+			log.Fatalf("GetAllDirectories errored: %+v", err)
+		}
+		gLogger.Info("GetAllDirectories done")
+
+		for _, dir := range dirs {
+			gLogger.Debug("Directory", zap.Any("dir", dir))
+		}
+
+		err = srvy.EstimateDirectorySize(sizeByRange, dirs)
+		if err != nil {
+			log.Fatalf("GetAllDirectories errored: %+v", err)
+		}
+		gLogger.Info("EstimateDirectorySize done")
 
 		totalSize := int64(0)
 
 		var smallestPartitionRange, biggestPartitionRange fdbstat.HashableKeyRange
 		smallestPartitionSize, biggestPartitionSize := int64(1<<62), int64(0)
 
-		for sbr, size := range sizeByRange {
-			if size > biggestPartitionSize {
+		for sbr, sbs := range sizeByRange {
+			if sbs.Size > biggestPartitionSize {
 				biggestPartitionRange = sbr
-				biggestPartitionSize = size
+				biggestPartitionSize = sbs.Size
 			}
-			if size < smallestPartitionSize {
+			if sbs.Size < smallestPartitionSize {
 				smallestPartitionRange = sbr
-				smallestPartitionSize = size
+				smallestPartitionSize = sbs.Size
 			}
-			totalSize += size
+			totalSize += sbs.Size
 			if !summary {
-				gLogger.Info("By range",
+				gLogger.Debug("By range",
 					zap.String("Begin", sbr.Begin),
 					zap.String("End", sbr.End),
-					zap.Int64("Size", size),
+					zap.Int64("Size", sbs.Size),
 				)
 			}
 		}

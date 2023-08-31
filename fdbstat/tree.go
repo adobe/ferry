@@ -14,7 +14,7 @@ import (
 type DirNode struct {
 	FlattenedPath   string // Also used as 'key' to index into DirListing below
 	Path            []string
-	Prefix          fdb.Key // raw key in original form
+	Prefix          []byte // raw key in original form
 	PrefixPrintable string
 	Children        []string // Immediate children only, slice of Flattened Path
 }
@@ -38,13 +38,16 @@ func (s *Surveyor) dir(path []string) (desc []DirNode, err error) {
 	} else {
 		subSpace = subspace.AllKeys()
 	}
-	node.Prefix = subSpace.FDBKey()
+	node.Prefix = append(node.Prefix, subSpace.Bytes()...)
 	node.PrefixPrintable = fdb.Printable(subSpace.Bytes())
 
 	s.logger.Debug("directory.List()",
 		zap.Strings("path", path),
 		zap.Any("prefix-pritable", node.PrefixPrintable),
-		zap.Any("prefix", node.Prefix))
+		zap.String("prefix", fmt.Sprintf("%+v", node.Prefix)))
+
+	s.logger.Debug("directory.List() #2",
+		zap.Any("Note", node))
 
 	dirs, err = directory.List(s.db, path)
 	if err != nil {
