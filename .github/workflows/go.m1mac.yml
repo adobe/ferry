@@ -25,28 +25,3 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version: 1.21
-
-    # Identify latest tag
-    - name: Identify the latest tag
-      id: identify-tag
-      run: |
-        git tag --sort=taggerdate | tail -1
-        echo "RELEASE_TAG=$(git tag --sort=taggerdate | tail -1)" >> $GITHUB_ENV
-
-    - name: Build
-      run: |
-        wget -q https://github.com/apple/foundationdb/releases/download/7.1.41/FoundationDB-7.1.41_arm64.pkg
-        sudo installer -pkg FoundationDB-7.1.41_arm64.pkg -target /
-        rm -fv FoundationDB-7.1.41_arm64.pkg
-        go build
-        tar cvzf ferry.m1mac.tar.gz ferry .ferry.yaml
-
-    - name: Test
-      run: go test -v ./...
-
-    - name: release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ env.RELEASE_TAG }}
-        files: |
-           ferry.m1mac.tar.gz
