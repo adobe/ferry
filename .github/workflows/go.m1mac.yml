@@ -13,7 +13,7 @@ on:
 jobs:
 
   build:
-    runs-on: macos-13-large
+    runs-on: macos-latest-xlarge
     steps:
     - uses: actions/checkout@v3
       id: release-branch-checkout
