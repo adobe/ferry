@@ -36,7 +36,7 @@ jobs:
     - name: Build
       run: |
         wget -q https://github.com/apple/foundationdb/releases/download/7.1.41/FoundationDB-7.1.41_arm64.pkg
-        sudo installer FoundationDB-7.1.41_arm64.pkg
+        sudo installer -pkg FoundationDB-7.1.41_arm64.pkg -target /
         rm -fv FoundationDB-7.1.41_arm64.pkg
         go build
         tar cvzf ferry.m1mac.tar.gz ferry .ferry.yaml
