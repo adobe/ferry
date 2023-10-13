@@ -1,0 +1,73 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Go
+
+on:
+  #push:
+  #  branches: [ "master" ]
+  #pull_request:
+  #  branches: [ "master" ]
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      id: release-branch-checkout
+      with:
+        # Include tags by using fetch-depth=0
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.18
+
+    # Identify latest tag
+    - name: Identify the latest tag
+      id: identify-tag
+      run: |
+        git tag --sort=taggerdate | tail -1
+        echo "RELEASE_TAG=$(git tag --sort=taggerdate | tail -1)" >> $GITHUB_ENV
+
+    - name: Build
+      run: |
+        wget -q https://github.com/apple/foundationdb/releases/download/7.1.15/foundationdb-clients_7.1.15-1_amd64.deb
+        sudo dpkg -i foundationdb-clients_7.1.15-1_amd64.deb
+        rm -fv foundationdb-clients_7.1.15-1_amd64.deb
+        go build
+        tar cvzf ferry.x86_64.tar.gz ferry .ferry.yaml
+        mkdir -p .debpkg/usr/local/bin/
+        cp -ipv ferry .debpkg/usr/local/bin/
+
+    - name: Test
+      run: go test -v ./...
+
+    - uses: jiro4989/build-deb-action@v2
+      with:
+          package: ferry
+          package_root: .debpkg
+          maintainer: Hari Bhaskaran
+          version: ${{ github.ref }} # refs/tags/v*.*.*
+          arch: 'amd64'
+          desc: 'ferry - A FoundationDB management utility'
+
+    - uses: jiro4989/build-rpm-action@v2
+      with:
+          summary: 'ferry - A FoundationDB management utility'
+          package: ferry
+          package_root: .debpkg
+          maintainer: Hari Bhaskaran
+          version: ${{ github.ref }} # refs/tags/v*.*.*
+          arch: 'x86_64'
+          desc: 'ferry - A FoundationDB management utility'
+
+    - name: release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.RELEASE_TAG }}
+        files: |
+           ferry.x86_64.tar.gz
