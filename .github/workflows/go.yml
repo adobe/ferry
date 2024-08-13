@@ -1,7 +1,7 @@
 # This workflow will build a golang project
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
 
-name: Go
+name: Go (amd64 - Linux)
 
 on:
   #push:
@@ -24,7 +24,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v3
       with:
-        go-version: 1.18
+        go-version: 1.23
 
     # Identify latest tag
     - name: Identify the latest tag
@@ -35,9 +35,9 @@ jobs:
 
     - name: Build
       run: |
-        wget -q https://github.com/apple/foundationdb/releases/download/7.1.15/foundationdb-clients_7.1.15-1_amd64.deb
-        sudo dpkg -i foundationdb-clients_7.1.15-1_amd64.deb
-        rm -fv foundationdb-clients_7.1.15-1_amd64.deb
+        wget -q https://github.com/apple/foundationdb/releases/download/7.3.43/foundationdb-clients_7.3.43-1_amd64.deb
+        sudo dpkg -i foundationdb-clients_7.3.43-1_amd64.deb
+        rm -fv foundationdb-clients_7.3.43-1_amd64.deb
         go build
         tar cvzf ferry.x86_64.tar.gz ferry .ferry.yaml
         mkdir -p .debpkg/usr/local/bin/
