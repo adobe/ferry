@@ -13,7 +13,7 @@ on:
 jobs:
 
   build:
-    runs-on: macos-13-xlarge
+    runs-on: macos-14
     steps:
     - uses: actions/checkout@v3
       id: release-branch-checkout
@@ -24,7 +24,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: 1.21
+        go-version: 1.23
 
     # Identify latest tag
     - name: Identify the latest tag
@@ -35,9 +35,9 @@ jobs:
 
     - name: Build
       run: |
-        wget -q https://github.com/apple/foundationdb/releases/download/7.1.41/FoundationDB-7.1.41_arm64.pkg
-        sudo installer -pkg FoundationDB-7.1.41_arm64.pkg -target /
-        rm -fv FoundationDB-7.1.41_arm64.pkg
+        wget -q https://github.com/apple/foundationdb/releases/download/7.3.43/FoundationDB-7.3.43_arm64.pkg
+        sudo installer -pkg FoundationDB-7.3.43_arm64.pkg -target /
+        rm -fv FoundationDB-7.3.43_arm64.pkg
         go build
         tar cvzf ferry.m1mac.tar.gz ferry .ferry.yaml
 
