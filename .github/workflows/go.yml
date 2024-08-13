@@ -30,7 +30,7 @@ jobs:
     - name: Identify the latest tag
       id: identify-tag
       run: |
-        git tag --sort=taggerdate | tail -1
+        git tag --sort=refname | tail -1
         echo "RELEASE_TAG=$(git tag --sort=refname | tail -1)" >> $GITHUB_ENV
 
     - name: Build
