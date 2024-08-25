@@ -6,7 +6,7 @@ toolchain go1.22.6
 
 require (
 	github.com/adobe/blackhole v0.1.6
-	github.com/apple/foundationdb/bindings/go v0.0.0-20240520132641-412531b5c97f
+	github.com/apple/foundationdb/bindings/go v0.0.0-20220711033714-dfe8dacba348
 	github.com/google/uuid v1.6.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/errors v0.9.1
@@ -59,7 +59,6 @@ require (
 	github.com/spf13/cast v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa // indirect
 	golang.org/x/net v0.28.0 // indirect

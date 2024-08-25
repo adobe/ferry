@@ -7,3 +7,4 @@ ferry
 *.key
 *.crt
 scratch
+tmp
